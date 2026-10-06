@@ -8,6 +8,13 @@
       "when": 1791319916749,
       "tag": "0000_purple_marvel_zombies",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1791322825848,
+      "tag": "0001_faithful_ironclad",
+      "breakpoints": true
     }
   ]
 }
