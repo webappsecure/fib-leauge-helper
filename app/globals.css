@@ -1,26 +1,106 @@
 @import "tailwindcss";
 
+/* Each token is light-dark(light, dark). The active side follows the system
+   setting unless the theme toggle sets data-theme on <html>. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: light dark;
+
+  --bg: light-dark(#f4f5f7, #0c1322);
+  --surface: light-dark(#ffffff, #131c30);
+  --surface-2: light-dark(#eef0f4, #18233b);
+  --border: light-dark(#d5d9e0, #26334f);
+
+  --text: light-dark(#131a26, #e6eaf2);
+  --muted: light-dark(#5a6475, #98a3b8);
+  --faint: light-dark(#8c95a3, #5f6b82);
+
+  --navy: light-dark(#14254a, #1b2f5e);
+  --navy-ink: light-dark(#f2f4f8, #f2f4f8);
+  --accent: light-dark(#c9982a, #e0b040);
+  --accent-ink: light-dark(#14254a, #0c1322);
+  --accent-text: light-dark(#8a6410, #e0b040);
+
+  --grade-aplus-bg: light-dark(#1f7a4d, #2fa56a);
+  --grade-aplus-ink: light-dark(#ffffff, #06220f);
+  --grade-a-bg: light-dark(#bfe6cf, #1f5a3c);
+  --grade-a-ink: light-dark(#0f4a2c, #c9f1d9);
+  --grade-bplus-bg: light-dark(#dcefc4, #36502a);
+  --grade-bplus-ink: light-dark(#35521a, #d9efc0);
+  --grade-b-bg: light-dark(#eceff3, #263247);
+  --grade-b-ink: light-dark(#2c3545, #cfd6e3);
+  --grade-c-bg: light-dark(#fbe9b8, #5a4610);
+  --grade-c-ink: light-dark(#6b4a05, #f6e2a6);
+  --grade-d-bg: light-dark(#f8d2b5, #5e3414);
+  --grade-d-ink: light-dark(#7a3a0c, #f7cfae);
+  --grade-f-bg: light-dark(#f3b9b9, #5e1f1f);
+  --grade-f-ink: light-dark(#7d1414, #f6c1c1);
+
+  --state-entered: light-dark(#2f6fd0, #6ea3ff);
+  --state-edited: light-dark(#8a6410, #e0b040);
+  --danger: light-dark(#b42318, #ff7b72);
+  --danger-bg: light-dark(#fdecea, #3a1614);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-border: var(--border);
+
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+
+  --color-navy: var(--navy);
+  --color-navy-ink: var(--navy-ink);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-text: var(--accent-text);
+
+  --color-grade-aplus-bg: var(--grade-aplus-bg);
+  --color-grade-aplus-ink: var(--grade-aplus-ink);
+  --color-grade-a-bg: var(--grade-a-bg);
+  --color-grade-a-ink: var(--grade-a-ink);
+  --color-grade-bplus-bg: var(--grade-bplus-bg);
+  --color-grade-bplus-ink: var(--grade-bplus-ink);
+  --color-grade-b-bg: var(--grade-b-bg);
+  --color-grade-b-ink: var(--grade-b-ink);
+  --color-grade-c-bg: var(--grade-c-bg);
+  --color-grade-c-ink: var(--grade-c-ink);
+  --color-grade-d-bg: var(--grade-d-bg);
+  --color-grade-d-ink: var(--grade-d-ink);
+  --color-grade-f-bg: var(--grade-f-bg);
+  --color-grade-f-ink: var(--grade-f-ink);
+
+  --color-state-entered: var(--state-entered);
+  --color-state-edited: var(--state-edited);
+  --color-danger: var(--danger);
+  --color-danger-bg: var(--danger-bg);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+@theme {
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas,
+    monospace;
+
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-base: 13px;
+  --text-lg: 16px;
+  --text-xl: 20px;
+
+  --radius-ui: 4px;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--bg);
+  color: var(--text);
 }

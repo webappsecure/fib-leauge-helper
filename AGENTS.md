@@ -46,8 +46,11 @@ and installed dependencies before adding machinery.
   errors.
 - Comment the why, not the what. No commented-out code or unused imports.
 - No em dashes in generated docs, comments, or commit messages.
-- No database, auth, component library, or validation library is chosen yet. Do
-  not assume one.
+- Data lives in a local SQLite file (`local-data/fib-league.db`, not in Git),
+  accessed with Drizzle ORM. All database access goes through `lib/data/`;
+  nothing else imports the query library or driver.
+- No auth, component library, or validation library is chosen yet. Do not
+  assume one.
 
 ## Commands
 
@@ -58,11 +61,13 @@ Next.js 16 (App Router) with npm. Run from the project root.
 - Build: `npm run build` (also typechecks)
 - Production server: `npm run start`
 - Lint: `npm run lint`
+- Test: `npm run test` (Vitest, single run; fails when no tests are found)
+- Test watch: `npm run test:watch`
+- Generate a database migration after changing `lib/data/schema.ts`:
+  `npm run db:generate`
 
-No test command is configured, so tests are not a gate yet. No separate
-typecheck, format, browser test, or combined verify command exists either. When
-a test runner is added, record its exact command here; from then on, logic
-changes must ship with a passing test.
+Tests are a gate: logic changes must ship with a passing test. No separate
+typecheck, format, browser test, or combined verify command exists.
 
 <!-- BEGIN:nextjs-agent-rules -->
 

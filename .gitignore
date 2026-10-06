@@ -45,3 +45,9 @@ next-env.d.ts
 .claude/
 blueprint/
 CLAUDE.md
+
+# Throwaway UI mockups (local only)
+prototypes/
+
+# local league database
+/local-data/
