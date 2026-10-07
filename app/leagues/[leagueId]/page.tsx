@@ -1,8 +1,20 @@
 import Link from "next/link";
 import { Suspense } from "react";
+import { GradeBadge } from "@/components/grade";
+import { QualityBadge } from "@/components/quality";
 import { Panel, PageTitle, buttonClass } from "@/components/ui";
-import { countPlayersByTeam, listTeams } from "@/lib/data";
+import {
+  countPlayersByTeam,
+  listLeagueRosterGrades,
+  listTeams,
+  type RosterGrades,
+} from "@/lib/data";
 import { GM_CATEGORIES, gmQualityLabel } from "@/lib/rules/gm";
+import {
+  bullpenQualities,
+  teamQualities,
+  type TeamQuality,
+} from "@/lib/rules/qualities";
 import { rosterSize } from "@/lib/rules/roster";
 import { isTeamComplete } from "@/lib/teams/validate";
 import { generateLeagueAction } from "./actions";
@@ -12,6 +24,41 @@ import { loadLeague } from "./load-league";
 const cell = "h-7 border-b border-border px-2 text-left whitespace-nowrap";
 const heading = `${cell} bg-surface-2 text-xs font-semibold tracking-wide text-muted uppercase`;
 
+const centered = "text-center";
+const notYet = <span className="text-faint">-</span>;
+
+function qualityCell(quality: TeamQuality) {
+  return (
+    <td className={`${cell} ${centered}`}>
+      {quality.available ? (
+        <QualityBadge tone={quality.tone} label={quality.label} />
+      ) : (
+        notYet
+      )}
+    </td>
+  );
+}
+
+// The five quality columns for one team, worked out from its current roster.
+function QualityCells({ roster, useDh }: { roster: RosterGrades[]; useDh: boolean }) {
+  const team = teamQualities(
+    roster.filter((player) => player.kind === "position"),
+    useDh,
+  );
+  const bullpen = bullpenQualities(roster.filter((player) => player.kind === "pitcher"));
+  return (
+    <>
+      {qualityCell(team.scoring)}
+      {qualityCell(team.power)}
+      {qualityCell(team.defense)}
+      <td className={`${cell} ${centered}`}>
+        {bullpen.grade.available ? <GradeBadge grade={bullpen.grade.grade} /> : notYet}
+      </td>
+      {qualityCell(bullpen.hrTendency)}
+    </>
+  );
+}
+
 async function LeagueHome({ params }: { params: Promise<{ leagueId: string }> }) {
   const league = await loadLeague(params);
   const teams = await listTeams(league.id);
@@ -20,6 +67,10 @@ async function LeagueHome({ params }: { params: Promise<{ leagueId: string }> })
       entry.teamId,
       entry.pitchers + entry.positionPlayers,
     ]),
+  );
+  const rosters = Map.groupBy(
+    await listLeagueRosterGrades(league.id),
+    (player) => player.teamId,
   );
   const fullRoster = rosterSize(league.useDh);
   const setupHref = `/leagues/${league.id}/teams`;
@@ -76,6 +127,25 @@ async function LeagueHome({ params }: { params: Promise<{ leagueId: string }> })
                   <th scope="col" className={heading}>
                     GM style
                   </th>
+                  <th scope="col" className={`${heading} ${centered}`}>
+                    Scoring
+                  </th>
+                  <th scope="col" className={`${heading} ${centered}`}>
+                    Power
+                  </th>
+                  <th scope="col" className={`${heading} ${centered}`}>
+                    Defense
+                  </th>
+                  <th scope="col" className={`${heading} ${centered}`}>
+                    <abbr title="Bullpen grade" className="no-underline">
+                      BP grade
+                    </abbr>
+                  </th>
+                  <th scope="col" className={`${heading} ${centered}`}>
+                    <abbr title="Bullpen home run tendency" className="no-underline">
+                      BP HR tend
+                    </abbr>
+                  </th>
                   <th scope="col" className={heading}>
                     Status
                   </th>
@@ -110,6 +180,10 @@ async function LeagueHome({ params }: { params: Promise<{ leagueId: string }> })
                       <td className={`${cell} text-muted`}>
                         {gmStyle.length > 0 ? gmStyle.join(" · ") : "GM not set"}
                       </td>
+                      <QualityCells
+                        roster={rosters.get(team.id) ?? []}
+                        useDh={league.useDh}
+                      />
                       <td className={cell}>
                         {isTeamComplete(team) ? "Complete" : "Incomplete"}
                       </td>

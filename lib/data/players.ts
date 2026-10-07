@@ -330,6 +330,44 @@ export async function getTeamPlayer(
   return (row as TeamPlayer | undefined) ?? null;
 }
 
+export type RosterGrades = { teamId: number; slot: string } & (
+  | { kind: "pitcher"; grade: Grade; hrTendency: HrTendency }
+  | { kind: "position"; hitting: Grade; power: Grade; defense: Grade }
+);
+
+// The grades team and bullpen qualities are worked out from, for every
+// player on a team in the league. Players with no team or slot are left out.
+export async function listLeagueRosterGrades(
+  leagueId: number,
+  database?: Database,
+): Promise<RosterGrades[]> {
+  const db = database ?? (await getDatabase());
+  const rows = await db
+    .select({
+      teamId: players.teamId,
+      slot: players.slot,
+      kind: players.kind,
+      grade: players.grade,
+      hrTendency: players.hrTendency,
+      hitting: players.hitting,
+      power: players.power,
+      defense: players.defense,
+    })
+    .from(players)
+    .where(
+      and(
+        eq(players.leagueId, leagueId),
+        isNotNull(players.teamId),
+        isNotNull(players.slot),
+      ),
+    );
+  return rows.map(({ teamId, slot, kind, grade, hrTendency, hitting, power, defense }) =>
+    kind === "pitcher"
+      ? { teamId, slot, kind, grade, hrTendency }
+      : { teamId, slot, kind, hitting, power, defense },
+  ) as RosterGrades[];
+}
+
 export type NamedPlayer = {
   id: number;
   teamId: number | null;

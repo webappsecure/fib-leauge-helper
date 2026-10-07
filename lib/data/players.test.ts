@@ -12,6 +12,7 @@ import {
   createPositionPlayers,
   getTeamPlayer,
   listLeaguePlayerNames,
+  listLeagueRosterGrades,
   renamePlayer,
   renameTeamPlayers,
   listTeamPitchers,
@@ -662,5 +663,56 @@ describe("player names", () => {
     expect((await listTeamPitchers(leagueId, teamIds[1], database))[0]).toEqual(
       otherTeamPitcher,
     );
+  });
+});
+
+describe("listLeagueRosterGrades", () => {
+  it("returns every team's players in the league with the grades qualities need", async () => {
+    const staff = namedStaff(100);
+    const hitters = namedLineup(200);
+    await createPitchingStaff(leagueId, teamIds[0], staff, database);
+    await createPositionPlayers(leagueId, teamIds[0], hitters, database);
+    await createPitchingStaff(leagueId, teamIds[1], namedStaff(300), database);
+    const other = await addLeague("Sun Belt League");
+    await createPitchingStaff(other.leagueId, other.teamIds[0], namedStaff(100), database);
+
+    const grades = await listLeagueRosterGrades(leagueId, database);
+    expect(grades).toHaveLength(31);
+    expect(grades.filter((player) => player.teamId === teamIds[1])).toHaveLength(11);
+
+    const rp2 = staff.find((pitcher) => pitcher.slot === "RP2")!;
+    expect(grades).toContainEqual({
+      teamId: teamIds[0],
+      slot: "RP2",
+      kind: "pitcher",
+      grade: rp2.grade,
+      hrTendency: rp2.hrTendency,
+    });
+    const shortstop = hitters.find((player) => player.slot === "SS")!;
+    expect(grades).toContainEqual({
+      teamId: teamIds[0],
+      slot: "SS",
+      kind: "position",
+      hitting: shortstop.hitting,
+      power: shortstop.power,
+      defense: shortstop.defense,
+    });
+
+    expect(await listLeagueRosterGrades(other.leagueId, database)).toHaveLength(11);
+  });
+
+  it("leaves out a player with no team or no slot", async () => {
+    await createPitchingStaff(leagueId, teamIds[0], namedStaff(100), database);
+    const [first, second] = await listTeamPitchers(leagueId, teamIds[0], database);
+    await database.$client.execute({
+      sql: "UPDATE players SET team_id = NULL, slot = NULL WHERE id = ?",
+      args: [first.id],
+    });
+    await database.$client.execute({
+      sql: "UPDATE players SET slot = NULL WHERE id = ?",
+      args: [second.id],
+    });
+
+    expect(await listLeagueRosterGrades(leagueId, database)).toHaveLength(9);
   });
 });

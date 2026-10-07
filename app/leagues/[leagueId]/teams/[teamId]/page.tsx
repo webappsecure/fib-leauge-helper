@@ -13,6 +13,7 @@ import {
 } from "@/lib/data";
 import { hrTendencyLabel } from "@/lib/rules/pitchers";
 import { GRADE_ATTRIBUTES } from "@/lib/rules/positions";
+import { bullpenQualities, teamQualities } from "@/lib/rules/qualities";
 import { rosterSize } from "@/lib/rules/roster";
 import { loadLeague } from "../../load-league";
 import {
@@ -28,6 +29,7 @@ import { PlayerName } from "./player-name";
 import { RerollButton } from "./reroll-button";
 import { RollButton } from "./roll-button";
 import { TeamDetails } from "./team-details";
+import { TeamQualitiesPanel } from "./team-qualities";
 
 type Params = Promise<{ leagueId: string; teamId: string }>;
 
@@ -276,7 +278,13 @@ async function TeamSheet({ params }: { params: Params }) {
           </>
         }
       />
-      <TeamDetails team={team} />
+      <div className="grid gap-x-4 md:grid-cols-3">
+        <TeamQualitiesPanel
+          team={teamQualities(positionPlayers, league.useDh)}
+          bullpen={bullpenQualities(pitchers)}
+        />
+        <TeamDetails team={team} />
+      </div>
       <Panel title="Pitching staff">
         {pitchers.length === 0 ? (
           <div className="grid justify-items-start gap-3 p-3">

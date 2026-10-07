@@ -39,6 +39,18 @@
   --grade-f-bg: light-dark(#f3b9b9, #5e1f1f);
   --grade-f-ink: light-dark(#7d1414, #f6c1c1);
 
+  /* Team and bullpen qualities reuse the grade colours, best to worst. */
+  --quality-high-bg: var(--grade-aplus-bg);
+  --quality-high-ink: var(--grade-aplus-ink);
+  --quality-semi-high-bg: var(--grade-a-bg);
+  --quality-semi-high-ink: var(--grade-a-ink);
+  --quality-neutral-bg: var(--grade-b-bg);
+  --quality-neutral-ink: var(--grade-b-ink);
+  --quality-semi-low-bg: var(--grade-d-bg);
+  --quality-semi-low-ink: var(--grade-d-ink);
+  --quality-low-bg: var(--grade-f-bg);
+  --quality-low-ink: var(--grade-f-ink);
+
   --state-entered: light-dark(#2f6fd0, #6ea3ff);
   --state-edited: light-dark(#8a6410, #e0b040);
   --danger: light-dark(#b42318, #ff7b72);
@@ -83,6 +95,17 @@
   --color-grade-d-ink: var(--grade-d-ink);
   --color-grade-f-bg: var(--grade-f-bg);
   --color-grade-f-ink: var(--grade-f-ink);
+
+  --color-quality-high-bg: var(--quality-high-bg);
+  --color-quality-high-ink: var(--quality-high-ink);
+  --color-quality-semi-high-bg: var(--quality-semi-high-bg);
+  --color-quality-semi-high-ink: var(--quality-semi-high-ink);
+  --color-quality-neutral-bg: var(--quality-neutral-bg);
+  --color-quality-neutral-ink: var(--quality-neutral-ink);
+  --color-quality-semi-low-bg: var(--quality-semi-low-bg);
+  --color-quality-semi-low-ink: var(--quality-semi-low-ink);
+  --color-quality-low-bg: var(--quality-low-bg);
+  --color-quality-low-ink: var(--quality-low-ink);
 
   --color-state-entered: var(--state-entered);
   --color-state-edited: var(--state-edited);

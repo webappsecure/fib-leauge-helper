@@ -27,7 +27,7 @@ function Detail({ label, children }: { label: string; children: ReactNode }) {
 // where these are entered.
 export function TeamDetails({ team }: { team: Team }) {
   return (
-    <div className="grid gap-x-4 md:grid-cols-2">
+    <>
       <Panel title="Front office">
         <dl className={list}>
           <Detail label="GM">{team.gmName}</Detail>
@@ -59,6 +59,6 @@ export function TeamDetails({ team }: { team: Team }) {
           <Detail label="Quality">{ballparkQualityLabel(team.ballparkQuality)}</Detail>
         </dl>
       </Panel>
-    </div>
+    </>
   );
 }
