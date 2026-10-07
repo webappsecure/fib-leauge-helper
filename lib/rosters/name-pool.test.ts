@@ -9,6 +9,7 @@ import { listTeams, saveTeams } from "../data/teams";
 import { DEFAULT_BALLPARK_QUALITY } from "../rules/ballpark";
 import { NAME_LIST } from "../rules/name-list";
 import type { TeamInput } from "../teams/validate";
+import { generateFreeAgents } from "./free-agents";
 import { generateLeague, generatePitchingStaff } from "./generate";
 import {
   checkStaffNames,
@@ -194,6 +195,20 @@ describe("listNameHolders", () => {
       { name: "Made Up Manager", label: "team 1's manager" },
       { name: nameOf(20), label: "team 2's GM" },
     ]);
+  });
+});
+
+describe("free agents as name holders", () => {
+  it("describes a free agent who holds a name", async () => {
+    const { league } = await addLeague([team(1, null, null)]);
+    await generateFreeAgents(league.id, 1, first, database);
+
+    const holders = await listNameHolders(league.id, database);
+    expect(holders).toHaveLength(9);
+    expect(findNameHolder(holders, nameOf(1))).toMatchObject({
+      label: "a free agent",
+      playerId: expect.any(Number),
+    });
   });
 });
 

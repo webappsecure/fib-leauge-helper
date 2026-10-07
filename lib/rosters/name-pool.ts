@@ -33,9 +33,11 @@ export async function listPlayerHolders(
       name: player.name,
       playerId: player.id,
       label:
-        number === undefined
-          ? "a player in this league"
-          : `team ${number}'s ${player.slot ?? "player"}`,
+        player.teamId === null
+          ? "a free agent"
+          : number === undefined
+            ? "a player in this league"
+            : `team ${number}'s ${player.slot ?? "player"}`,
     };
   });
 }

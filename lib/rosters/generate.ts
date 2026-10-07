@@ -16,7 +16,7 @@ import { usedNameIds } from "./name-pool";
 // Gives each rolled player an unused name and marks it used, so no name
 // repeats in the league, including the names of saved GMs and managers. A
 // player gets no name once the list is exhausted.
-function withNames<T>(rolled: T[], used: Set<number>, random: RandomSource) {
+export function withNames<T>(rolled: T[], used: Set<number>, random: RandomSource) {
   return rolled.map((player) => {
     const name = pickName(used, random);
     if (name) used.add(name.id);

@@ -1,4 +1,11 @@
-import { and, count, eq, inArray, isNotNull } from "drizzle-orm";
+import { and, count, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import {
+  FREE_AGENT_POSITIONS,
+  type FreeAgentArchetype,
+  type FreeAgentFieldPosition,
+  type FreeAgentPosition,
+  type RolledFreeAgentPositionPlayer,
+} from "../rules/free-agents";
 import type { Grade } from "../rules/grades";
 import {
   orderStarters,
@@ -31,16 +38,17 @@ export type PlayerRoll = {
   source: RollSource;
 };
 
-type PlayerBase = {
+type PersonBase = {
   id: number;
   leagueId: number;
-  teamId: number;
   name: string | null;
   nameListId: number | null;
   age: number;
   breakthroughUsed: boolean;
   rolls: PlayerRoll[];
 };
+
+type PlayerBase = PersonBase & { teamId: number };
 
 export type Pitcher = PlayerBase & {
   slot: PitcherSlot;
@@ -91,6 +99,11 @@ async function listTeamPlayers(
         eq(players.kind, kind),
       ),
     );
+  return withRolls(db, rows);
+}
+
+// Attaches the dice behind each player's values.
+async function withRolls<T extends { id: number }>(db: Database, rows: T[]) {
   if (rows.length === 0) return [];
 
   const rollRows = await db
@@ -201,7 +214,7 @@ function pitcherColumns(pitcher: RolledPitcher) {
   };
 }
 
-function positionColumns(player: RolledPositionPlayer) {
+function positionColumns(player: Omit<RolledPositionPlayer, "slot">) {
   return {
     archetype: player.archetype,
     age: player.age,
@@ -642,4 +655,119 @@ export function replacePositionPlayerValues(
     player.rolls,
     database,
   );
+}
+
+// A free agent is a player with no team and no slot. Their rolled grades are
+// also their ceilings.
+type FreeAgentBase = PersonBase & { teamId: null; slot: null };
+
+export type FreeAgentPitcher = FreeAgentBase & {
+  naturalPosition: PitcherRole;
+  grade: Grade;
+  gradeCeiling: Grade;
+  hrTendency: HrTendency;
+  stamina: number | null;
+};
+
+export type FreeAgentPositionPlayer = FreeAgentBase & {
+  naturalPosition: FreeAgentFieldPosition;
+  archetype: FreeAgentArchetype;
+  hitting: Grade;
+  power: Grade;
+  defense: Grade;
+  clutch: Grade;
+  hittingCeiling: Grade;
+  powerCeiling: Grade;
+  defenseCeiling: Grade;
+  clutchCeiling: Grade;
+};
+
+export type NewFreeAgent = Named &
+  (
+    | { kind: "pitcher"; rolled: RolledPitcher }
+    | { kind: "position"; rolled: RolledFreeAgentPositionPlayer }
+  );
+
+const isFreeAgent = (leagueId: number) =>
+  and(eq(players.leagueId, leagueId), isNull(players.teamId), isNull(players.slot));
+
+// The league's free agents with their dice, in pool position order and then
+// in the order they were created.
+export async function listFreeAgents(
+  leagueId: number,
+  database?: Database,
+): Promise<{ pitchers: FreeAgentPitcher[]; positionPlayers: FreeAgentPositionPlayer[] }> {
+  const db = database ?? (await getDatabase());
+  const rows = await withRolls(
+    db,
+    await db.select().from(players).where(isFreeAgent(leagueId)),
+  );
+  const place = (row: { naturalPosition: string }) =>
+    FREE_AGENT_POSITIONS.indexOf(row.naturalPosition as FreeAgentPosition);
+  rows.sort((a, b) => place(a) - place(b) || a.id - b.id);
+  return {
+    pitchers: rows.filter((row) => row.kind === "pitcher") as unknown as FreeAgentPitcher[],
+    positionPlayers: rows.filter(
+      (row) => row.kind === "position",
+    ) as unknown as FreeAgentPositionPlayer[],
+  };
+}
+
+// How many free agents the league has at each position that has any.
+export async function countFreeAgentsByPosition(
+  leagueId: number,
+  database?: Database | Transaction,
+): Promise<Map<string, number>> {
+  const db = database ?? (await getDatabase());
+  const rows = await db
+    .select({ position: players.naturalPosition, total: count() })
+    .from(players)
+    .where(isFreeAgent(leagueId))
+    .groupBy(players.naturalPosition);
+  return new Map(rows.map((row) => [row.position, row.total]));
+}
+
+// Adds free agents in order, skipping any whose position already has
+// `target` of them. The count is taken in the same transaction as the
+// inserts, so a repeated request cannot overfill a position.
+export async function addFreeAgents(
+  leagueId: number,
+  target: number,
+  entries: NewFreeAgent[],
+  database?: Database,
+): Promise<{ created: number }> {
+  const db = database ?? (await getDatabase());
+  return db.transaction(async (tx) => {
+    const counts = await countFreeAgentsByPosition(leagueId, tx);
+    let created = 0;
+    for (const entry of entries) {
+      const position =
+        entry.kind === "pitcher" ? entry.rolled.role : entry.rolled.position;
+      const have = counts.get(position) ?? 0;
+      if (have >= target) continue;
+
+      const [{ id: playerId }] = await tx
+        .insert(players)
+        .values({
+          ...(entry.kind === "pitcher"
+            ? pitcherColumns(entry.rolled)
+            : positionColumns(entry.rolled)),
+          leagueId,
+          teamId: null,
+          slot: null,
+          kind: entry.kind,
+          naturalPosition: position,
+          name: entry.name,
+          nameListId: entry.nameListId,
+          breakthroughUsed: false,
+        })
+        .returning({ id: players.id });
+      await tx.insert(rolls).values(
+        entry.rolled.rolls.map((roll) => ({ ...roll, leagueId, playerId, source: "app" })),
+      );
+      counts.set(position, have + 1);
+      created += 1;
+    }
+    return { created };
+  });
 }

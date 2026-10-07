@@ -2,6 +2,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+  rollFreeAgentPitcher,
+  rollFreeAgentPositionPlayer,
+} from "../rules/free-agents";
 import { GRADES, type Grade } from "../rules/grades";
 import {
   orderStarters,
@@ -13,12 +17,15 @@ import {
 } from "../rules/pitchers";
 import { rollLineup, rollPositionPlayer } from "../rules/positions";
 import { openDatabase, type Database } from "./db";
-import { createLeague } from "./leagues";
+import { createLeague, deleteLeague } from "./leagues";
 import {
+  addFreeAgents,
+  countFreeAgentsByPosition,
   countPlayersByTeam,
   createPitchingStaff,
   createPositionPlayers,
   getTeamPlayer,
+  listFreeAgents,
   listLeaguePlayerNames,
   listLeagueRosterGrades,
   renamePlayer,
@@ -30,6 +37,7 @@ import {
   replacePositionPlayerValues,
   replaceTeamValues,
   listTeamPlayerIds,
+  type NewFreeAgent,
   type NewPitcher,
   type Pitcher,
   type NewPositionPlayer,
@@ -868,5 +876,172 @@ describe("listLeagueRosterGrades", () => {
     });
 
     expect(await listLeagueRosterGrades(leagueId, database)).toHaveLength(9);
+  });
+});
+
+describe("free agents", () => {
+  // One free agent at each of the named positions, named from consecutive
+  // name-list ids.
+  function agents(firstNameId: number, ...positions: ("SP" | "RP" | "CL" | "C" | "OF")[]) {
+    return positions.map((position, index): NewFreeAgent => {
+      const named = {
+        name: `Free Agent ${firstNameId + index}`,
+        nameListId: firstNameId + index,
+      };
+      return position === "C" || position === "OF"
+        ? { ...named, kind: "position", rolled: rollFreeAgentPositionPlayer(position) }
+        : { ...named, kind: "pitcher", rolled: rollFreeAgentPitcher(position) };
+    });
+  }
+
+  it("saves free agents with no team or slot, with their values and rolls", async () => {
+    const entries = agents(1, "OF", "SP", "RP");
+    expect(await addFreeAgents(leagueId, 2, entries, database)).toEqual({ created: 3 });
+
+    const pool = await listFreeAgents(leagueId, database);
+    // Listed in pool position order, not the order they were saved in.
+    expect(pool.pitchers.map((pitcher) => pitcher.naturalPosition)).toEqual(["SP", "RP"]);
+    expect(pool.positionPlayers).toHaveLength(1);
+
+    const [, starter, reliever] = entries;
+    if (starter.kind !== "pitcher" || entries[0].kind !== "position") throw new Error("setup");
+    expect(pool.pitchers[0]).toMatchObject({
+      leagueId,
+      teamId: null,
+      slot: null,
+      kind: "pitcher",
+      name: "Free Agent 2",
+      nameListId: 2,
+      age: starter.rolled.age,
+      grade: starter.rolled.grade,
+      gradeCeiling: starter.rolled.grade,
+      hrTendency: starter.rolled.hrTendency,
+      stamina: starter.rolled.stamina,
+      breakthroughUsed: false,
+    });
+    expect(pool.pitchers[0].rolls).toEqual(
+      starter.rolled.rolls.map((roll) => ({ ...roll, source: "app" })),
+    );
+    expect(pool.pitchers[1].stamina).toBeNull();
+    expect(pool.pitchers[1].rolls).toHaveLength(reliever.rolled.rolls.length);
+
+    const outfielder = entries[0].rolled;
+    expect(pool.positionPlayers[0]).toMatchObject({
+      teamId: null,
+      slot: null,
+      kind: "position",
+      naturalPosition: "OF",
+      archetype: outfielder.archetype,
+      hitting: outfielder.hitting,
+      hittingCeiling: outfielder.hitting,
+      power: outfielder.power,
+      powerCeiling: outfielder.power,
+      defense: outfielder.defense,
+      defenseCeiling: outfielder.defense,
+      clutch: outfielder.clutch,
+      clutchCeiling: outfielder.clutch,
+    });
+    expect(pool.positionPlayers[0].rolls).toHaveLength(6);
+  });
+
+  it("lists free agents at one position in the order they were created", async () => {
+    await addFreeAgents(leagueId, 3, agents(1, "CL", "C", "CL", "C", "CL"), database);
+    const pool = await listFreeAgents(leagueId, database);
+    expect(pool.pitchers.map((pitcher) => pitcher.name)).toEqual([
+      "Free Agent 1",
+      "Free Agent 3",
+      "Free Agent 5",
+    ]);
+    expect(pool.positionPlayers.map((player) => player.name)).toEqual([
+      "Free Agent 2",
+      "Free Agent 4",
+    ]);
+  });
+
+  it("stops at the target, so a repeated request adds nothing", async () => {
+    expect(
+      await addFreeAgents(leagueId, 2, agents(1, "SP", "SP", "SP", "C"), database),
+    ).toEqual({ created: 3 });
+    expect(await addFreeAgents(leagueId, 2, agents(10, "SP", "SP", "C"), database)).toEqual({
+      created: 1,
+    });
+    expect(await addFreeAgents(leagueId, 2, agents(20, "SP", "SP", "C"), database)).toEqual({
+      created: 0,
+    });
+    expect(await countFreeAgentsByPosition(leagueId, database)).toEqual(
+      new Map([
+        ["SP", 2],
+        ["C", 2],
+      ]),
+    );
+  });
+
+  it("leaves a position alone that is already over the target", async () => {
+    await addFreeAgents(leagueId, 3, agents(1, "RP", "RP", "RP"), database);
+    expect(await addFreeAgents(leagueId, 1, agents(10, "RP", "CL"), database)).toEqual({
+      created: 1,
+    });
+    expect(await countFreeAgentsByPosition(leagueId, database)).toEqual(
+      new Map([
+        ["RP", 3],
+        ["CL", 1],
+      ]),
+    );
+  });
+
+  it("keeps each league's pool to itself", async () => {
+    const other = await addLeague("Sun Belt League");
+    await addFreeAgents(other.leagueId, 2, agents(1, "SP", "SP", "C"), database);
+
+    expect(await countFreeAgentsByPosition(leagueId, database)).toEqual(new Map());
+    expect(await listFreeAgents(leagueId, database)).toEqual({
+      pitchers: [],
+      positionPlayers: [],
+    });
+    // The other league being full does not stop this one filling up.
+    expect(await addFreeAgents(leagueId, 2, agents(1, "SP", "SP"), database)).toEqual({
+      created: 2,
+    });
+    expect((await listFreeAgents(other.leagueId, database)).pitchers).toHaveLength(2);
+  });
+
+  it("does not count team players as free agents, or free agents as team players", async () => {
+    await createPitchingStaff(leagueId, teamIds[0], namedStaff(1), database);
+    await addFreeAgents(leagueId, 2, agents(100, "SP", "C"), database);
+
+    expect(await countFreeAgentsByPosition(leagueId, database)).toEqual(
+      new Map([
+        ["SP", 1],
+        ["C", 1],
+      ]),
+    );
+    expect(await countPlayersByTeam(leagueId, database)).toEqual([
+      { teamId: teamIds[0], pitchers: 11, positionPlayers: 0 },
+    ]);
+    expect(await listLeagueRosterGrades(leagueId, database)).toHaveLength(11);
+    expect(await listTeamPitchers(leagueId, teamIds[0], database)).toHaveLength(11);
+    expect(await listUsedNameIds(leagueId, database)).toHaveLength(13);
+  });
+
+  it("refuses a name-list id another player in the league holds", async () => {
+    await createPitchingStaff(leagueId, teamIds[0], namedStaff(1), database);
+    await expect(
+      addFreeAgents(leagueId, 2, agents(20, "SP", "C").concat(agents(1, "RP")), database),
+    ).rejects.toThrow();
+    // All or nothing: the two good ones were not kept either.
+    expect(await countFreeAgentsByPosition(leagueId, database)).toEqual(new Map());
+  });
+
+  it("is removed with its league, rolls included", async () => {
+    await addFreeAgents(leagueId, 2, agents(1, "SP", "OF"), database);
+    expect(await deleteLeague(leagueId, database)).toBe(true);
+
+    for (const table of ["players", "rolls"]) {
+      const result = await database.$client.execute({
+        sql: `SELECT COUNT(*) AS total FROM ${table} WHERE league_id = ?`,
+        args: [leagueId],
+      });
+      expect(Number(result.rows[0].total)).toBe(0);
+    }
   });
 });

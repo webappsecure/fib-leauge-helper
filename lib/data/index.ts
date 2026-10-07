@@ -7,10 +7,13 @@ export {
 } from "./leagues";
 export type { League, NewLeague } from "./leagues";
 export {
+  addFreeAgents,
+  countFreeAgentsByPosition,
   countPlayersByTeam,
   createPitchingStaff,
   createPositionPlayers,
   getTeamPlayer,
+  listFreeAgents,
   listLeaguePlayerNames,
   listLeagueRosterGrades,
   listTeamPitchers,
@@ -24,7 +27,10 @@ export {
   replaceTeamValues,
 } from "./players";
 export type {
+  FreeAgentPitcher,
+  FreeAgentPositionPlayer,
   NamedPlayer,
+  NewFreeAgent,
   NewPitcher,
   NewPositionPlayer,
   Pitcher,
