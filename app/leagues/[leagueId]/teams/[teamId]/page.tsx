@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { Dice } from "@/components/dice";
 import { GradeBadge } from "@/components/grade";
-import { Panel, PageTitle } from "@/components/ui";
+import { Panel, PageTitle, buttonClass } from "@/components/ui";
 import {
   getTeam,
   listTeamPitchers,
@@ -17,6 +17,7 @@ import { rosterSize } from "@/lib/rules/roster";
 import { loadLeague } from "../../load-league";
 import { rollPitchingStaffAction, rollPositionPlayersAction } from "./actions";
 import { RollButton } from "./roll-button";
+import { TeamDetails } from "./team-details";
 
 type Params = Promise<{ leagueId: string; teamId: string }>;
 
@@ -215,7 +216,13 @@ async function TeamSheet({ params }: { params: Params }) {
         meta={`${league.startYear} season · ${playerCount} of ${rosterSize(league.useDh)} players · ${
           league.useDh ? "DH league" : "No DH"
         }`}
+        actions={
+          <Link href={`/leagues/${league.id}/teams`} className={buttonClass.secondary}>
+            Team setup
+          </Link>
+        }
       />
+      <TeamDetails team={team} />
       <Panel title="Pitching staff">
         {pitchers.length === 0 ? (
           <div className="grid justify-items-start gap-3 p-3">
