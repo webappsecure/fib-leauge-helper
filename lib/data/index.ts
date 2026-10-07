@@ -1,4 +1,10 @@
-export { createLeague, getLeague, listLeagues } from "./leagues";
+export {
+  createLeague,
+  deleteLeague,
+  getLeague,
+  listLeagues,
+  updateLeagueSettings,
+} from "./leagues";
 export type { League, NewLeague } from "./leagues";
 export {
   countPlayersByTeam,

@@ -101,6 +101,9 @@ async function LeagueHome({ params }: { params: Promise<{ leagueId: string }> })
             <Link href={setupHref} className={buttonClass.primary}>
               Set up teams
             </Link>
+            <Link href={`/leagues/${league.id}/settings`} className={buttonClass.secondary}>
+              Settings
+            </Link>
           </>
         }
       />

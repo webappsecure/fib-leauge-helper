@@ -13,14 +13,13 @@ import {
   validateTeams,
   type TeamErrors,
 } from "@/lib/teams/validate";
+import { isId } from "../../action-input";
 
 export type SaveTeamsResult = { ok: true } | { ok: false; errors: TeamErrors };
 
 // The league id comes from the browser, so the league is reloaded.
 async function loadLeague(leagueId: unknown) {
-  return typeof leagueId === "number" && Number.isSafeInteger(leagueId)
-    ? getLeague(leagueId)
-    : null;
+  return isId(leagueId) ? getLeague(leagueId) : null;
 }
 
 export async function saveTeamsAction(

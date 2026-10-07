@@ -8,6 +8,7 @@ import {
 } from "@/lib/rosters/generate";
 import { drawPlayerName, renameTeam, setPlayerName } from "@/lib/rosters/rename";
 import { rerollPlayer, rerollTeam } from "@/lib/rosters/reroll";
+import { isId } from "../../../action-input";
 
 export type RollResult = { ok: true } | { ok: false; error: string };
 export type NameResult = { ok: true; name: string } | { ok: false; error: string };
@@ -18,10 +19,6 @@ const NO_PLAYERS = "This team has no players to re-roll yet.";
 const NO_PLAYERS_TO_RENAME = "This team has no players to rename yet.";
 const PLAYER_NOT_FOUND =
   "This player is no longer on this team. Reload the page and try again.";
-
-function isId(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
-}
 
 // Both ids come from the browser, so the league and team are reloaded here.
 async function loadTeam(leagueId: unknown, teamId: unknown) {

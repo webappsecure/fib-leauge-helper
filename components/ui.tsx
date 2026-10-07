@@ -6,6 +6,8 @@ const buttonBase =
 export const buttonClass = {
   primary: `${buttonBase} border-accent bg-accent font-semibold text-accent-ink`,
   secondary: `${buttonBase} border-border bg-surface text-text hover:border-accent`,
+  // For an action that cannot be undone.
+  danger: `${buttonBase} border-danger bg-surface font-semibold text-danger hover:bg-danger-bg`,
 };
 
 export function PageTitle({

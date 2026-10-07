@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createLeague } from "@/lib/data";
+import { formText } from "../action-input";
 import {
   validateLeagueInput,
   type LeagueFieldErrors,
@@ -12,10 +13,6 @@ export type LeagueFormState = {
   values: { name: string; startYear: string; teamCount: string; useDh: boolean };
   errors: LeagueFieldErrors;
 };
-
-function text(value: FormDataEntryValue | null) {
-  return typeof value === "string" ? value : "";
-}
 
 export async function createLeagueAction(
   _previous: LeagueFormState,
@@ -32,9 +29,9 @@ export async function createLeagueAction(
   if (!result.ok) {
     return {
       values: {
-        name: text(raw.name),
-        startYear: text(raw.startYear),
-        teamCount: text(raw.teamCount),
+        name: formText(raw.name),
+        startYear: formText(raw.startYear),
+        teamCount: formText(raw.teamCount),
         useDh: raw.useDh === "on",
       },
       errors: result.errors,

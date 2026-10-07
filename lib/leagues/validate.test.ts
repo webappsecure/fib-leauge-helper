@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { validateLeagueInput, type RawLeagueInput } from "./validate";
+import {
+  validateLeagueInput,
+  type RawLeagueInput,
+  validateLeagueSettings,
+} from "./validate";
 
 const valid: RawLeagueInput = {
   name: "Great Lakes League",
@@ -80,6 +84,53 @@ describe("validateLeagueInput", () => {
       name: "Enter a league name.",
       startYear: "Enter a year between 1 and 9999.",
       teamCount: "Enter a number of teams between 2 and 100.",
+    });
+  });
+});
+
+describe("validateLeagueSettings", () => {
+  it("accepts a valid name and year and returns cleaned values", () => {
+    expect(validateLeagueSettings({ name: "  Great Lakes League ", startYear: " 1975 " })).toEqual({
+      ok: true,
+      value: { name: "Great Lakes League", startYear: 1975 },
+    });
+    expect(validateLeagueSettings({ name: "x", startYear: 2026 })).toEqual({
+      ok: true,
+      value: { name: "x", startYear: 2026 },
+    });
+  });
+
+  it("uses the same name rules and messages as creating a league", () => {
+    const error = (name: unknown) => {
+      const result = validateLeagueSettings({ name, startYear: "2026" });
+      return result.ok ? null : result.errors;
+    };
+    expect(error("")).toEqual({ name: "Enter a league name." });
+    expect(error("   ")).toEqual({ name: "Enter a league name." });
+    expect(error(null)).toEqual({ name: "Enter a league name." });
+    expect(error(42)).toEqual({ name: "Enter a league name." });
+    expect(error("a".repeat(80))).toBeNull();
+    expect(error("é".repeat(80))).toBeNull();
+    expect(error("a".repeat(81))).toEqual({ name: "Keep the name to 80 characters or fewer." });
+  });
+
+  it("uses the same year rules and messages as creating a league", () => {
+    const error = (startYear: unknown) => {
+      const result = validateLeagueSettings({ name: "Great Lakes League", startYear });
+      return result.ok ? null : result.errors;
+    };
+    const message = { startYear: "Enter a year between 1 and 9999." };
+    expect(error("1")).toBeNull();
+    expect(error("9999")).toBeNull();
+    for (const bad of ["0", "10000", "", "next year", "2026.5", "-5", null, undefined, 2026.5]) {
+      expect(error(bad)).toEqual(message);
+    }
+  });
+
+  it("reports both fields at once", () => {
+    expect(validateLeagueSettings({ name: "", startYear: "soon" })).toEqual({
+      ok: false,
+      errors: { name: "Enter a league name.", startYear: "Enter a year between 1 and 9999." },
     });
   });
 });

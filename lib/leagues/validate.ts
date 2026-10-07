@@ -39,9 +39,12 @@ function inRange(value: number | null, min: number, max: number) {
   return value !== null && value >= min && value <= max;
 }
 
-export function validateLeagueInput(raw: RawLeagueInput): LeagueValidation {
-  const errors: LeagueFieldErrors = {};
-
+// The name and starting year follow the same rules when a league is created
+// and when its settings are changed.
+function checkNameAndYear(
+  raw: { name: unknown; startYear: unknown },
+  errors: Pick<LeagueFieldErrors, "name" | "startYear">,
+) {
   const name = typeof raw.name === "string" ? raw.name.trim() : "";
   if (name === "") {
     errors.name = "Enter a league name.";
@@ -53,6 +56,31 @@ export function validateLeagueInput(raw: RawLeagueInput): LeagueValidation {
   if (!inRange(startYear, LEAGUE_LIMITS.minYear, LEAGUE_LIMITS.maxYear)) {
     errors.startYear = `Enter a year between ${LEAGUE_LIMITS.minYear} and ${LEAGUE_LIMITS.maxYear}.`;
   }
+  return { name, startYear };
+}
+
+export type LeagueSettingsInput = { name: string; startYear: number };
+
+export type LeagueSettingsErrors = Pick<LeagueFieldErrors, "name" | "startYear">;
+
+export type LeagueSettingsValidation =
+  | { ok: true; value: LeagueSettingsInput }
+  | { ok: false; errors: LeagueSettingsErrors };
+
+// The two settings that can be changed after a league is created.
+export function validateLeagueSettings(raw: {
+  name: unknown;
+  startYear: unknown;
+}): LeagueSettingsValidation {
+  const errors: LeagueSettingsErrors = {};
+  const { name, startYear } = checkNameAndYear(raw, errors);
+  if (Object.keys(errors).length > 0) return { ok: false, errors };
+  return { ok: true, value: { name, startYear: startYear as number } };
+}
+
+export function validateLeagueInput(raw: RawLeagueInput): LeagueValidation {
+  const errors: LeagueFieldErrors = {};
+  const { name, startYear } = checkNameAndYear(raw, errors);
 
   const teamCount = parseWholeNumber(raw.teamCount);
   if (!inRange(teamCount, LEAGUE_LIMITS.minTeams, LEAGUE_LIMITS.maxTeams)) {

@@ -1,14 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState, useEffect, useRef } from "react";
+import { useActionState, useRef } from "react";
 import { buttonClass } from "@/components/ui";
+import { LeagueTextField, useFocusFirstInvalid } from "../league-fields";
 import { createLeagueAction, type LeagueFormState } from "./actions";
 
 const fields = ["name", "startYear", "teamCount"] as const;
-
-const inputClass =
-  "h-7 w-full rounded-ui border border-border bg-surface px-1.5 text-text focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent aria-invalid:border-danger aria-invalid:bg-danger-bg";
 
 export function LeagueForm({ defaultYear }: { defaultYear: number }) {
   const initialState: LeagueFormState = {
@@ -27,35 +25,7 @@ export function LeagueForm({ defaultYear }: { defaultYear: number }) {
   const formRef = useRef<HTMLFormElement>(null);
   const hasErrors = Object.keys(state.errors).length > 0;
 
-  useEffect(() => {
-    const firstInvalid = fields.find((field) => state.errors[field]);
-    if (firstInvalid) {
-      formRef.current
-        ?.querySelector<HTMLInputElement>(`[name="${firstInvalid}"]`)
-        ?.focus();
-    }
-  }, [state]);
-
-  function fieldProps(field: (typeof fields)[number]) {
-    const error = state.errors[field];
-    return {
-      id: field,
-      name: field,
-      defaultValue: state.values[field],
-      className: inputClass,
-      "aria-invalid": error ? true : undefined,
-      "aria-describedby": error ? `${field}-error` : undefined,
-    };
-  }
-
-  function fieldError(field: (typeof fields)[number]) {
-    const error = state.errors[field];
-    return error ? (
-      <p id={`${field}-error`} className="mt-1 text-xs text-danger">
-        {error}
-      </p>
-    ) : null;
-  }
+  useFocusFirstInvalid(formRef, fields, state);
 
   return (
     <form
@@ -70,39 +40,26 @@ export function LeagueForm({ defaultYear }: { defaultYear: number }) {
         </p>
       ) : null}
 
-      <div>
-        <label htmlFor="name" className="mb-1 block text-muted">
-          League name
-        </label>
-        <input type="text" autoComplete="off" {...fieldProps("name")} />
-        {fieldError("name")}
-      </div>
-
-      <div>
-        <label htmlFor="startYear" className="mb-1 block text-muted">
-          Starting year
-        </label>
-        <input
-          type="text"
-          inputMode="numeric"
-          autoComplete="off"
-          {...fieldProps("startYear")}
-        />
-        {fieldError("startYear")}
-      </div>
-
-      <div>
-        <label htmlFor="teamCount" className="mb-1 block text-muted">
-          Number of teams
-        </label>
-        <input
-          type="text"
-          inputMode="numeric"
-          autoComplete="off"
-          {...fieldProps("teamCount")}
-        />
-        {fieldError("teamCount")}
-      </div>
+      <LeagueTextField
+        name="name"
+        label="League name"
+        defaultValue={state.values.name}
+        error={state.errors.name}
+      />
+      <LeagueTextField
+        name="startYear"
+        label="Starting year"
+        defaultValue={state.values.startYear}
+        error={state.errors.startYear}
+        numeric
+      />
+      <LeagueTextField
+        name="teamCount"
+        label="Number of teams"
+        defaultValue={state.values.teamCount}
+        error={state.errors.teamCount}
+        numeric
+      />
 
       <label className="flex items-center gap-2">
         <input
