@@ -2,14 +2,14 @@
 
 import { useState, useTransition } from "react";
 import { buttonClass } from "@/components/ui";
-import { rollPitchingStaffAction } from "./actions";
+import type { RollResult } from "./actions";
 
-export function RollStaffButton({
-  leagueId,
-  teamId,
+export function RollButton({
+  label,
+  action,
 }: {
-  leagueId: number;
-  teamId: number;
+  label: string;
+  action: () => Promise<RollResult>;
 }) {
   const [rolling, startRolling] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -17,7 +17,7 @@ export function RollStaffButton({
   function roll() {
     setError(null);
     startRolling(async () => {
-      const result = await rollPitchingStaffAction(leagueId, teamId);
+      const result = await action();
       if (!result.ok) setError(result.error);
     });
   }
@@ -30,7 +30,7 @@ export function RollStaffButton({
         disabled={rolling}
         className={buttonClass.primary}
       >
-        {rolling ? "Rolling" : "Roll pitching staff"}
+        {rolling ? "Rolling" : label}
       </button>
       {error && (
         <p role="alert" className="text-sm text-danger">

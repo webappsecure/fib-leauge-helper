@@ -3,13 +3,18 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { PITCHER_SLOTS, rollPitchingStaff } from "../rules/pitchers";
+import { rollLineup } from "../rules/positions";
 import { openDatabase, type Database } from "./db";
 import { createLeague } from "./leagues";
 import {
+  countPlayersByTeam,
   createPitchingStaff,
+  createPositionPlayers,
   listTeamPitchers,
+  listTeamPositionPlayers,
   listUsedNameIds,
   type NewPitcher,
+  type NewPositionPlayer,
 } from "./players";
 import { getTeam, listTeams, saveTeams } from "./teams";
 
@@ -52,6 +57,14 @@ function namedStaff(firstNameId: number): NewPitcher[] {
   return rollPitchingStaff().map((pitcher, index) => ({
     ...pitcher,
     name: `Pitcher ${firstNameId + index}`,
+    nameListId: firstNameId + index,
+  }));
+}
+
+function namedLineup(firstNameId: number, useDh = true): NewPositionPlayer[] {
+  return rollLineup(useDh).map((player, index) => ({
+    ...player,
+    name: `Hitter ${firstNameId + index}`,
     nameListId: firstNameId + index,
   }));
 }
@@ -180,5 +193,114 @@ describe("pitching staff data", () => {
     expect(
       await listTeamPitchers(other.leagueId, other.teamIds[0], database),
     ).toHaveLength(11);
+  });
+});
+
+describe("position player data", () => {
+  it("starts with no position players", async () => {
+    expect(await listTeamPositionPlayers(leagueId, teamIds[0], database)).toEqual([]);
+  });
+
+  it("saves a lineup and reads it back in slot order with its rolls", async () => {
+    const lineup = namedLineup(300);
+    const result = await createPositionPlayers(
+      leagueId,
+      teamIds[0],
+      [...lineup].reverse(),
+      database,
+    );
+    expect(result).toEqual({ created: true });
+
+    const saved = await listTeamPositionPlayers(leagueId, teamIds[0], database);
+    expect(saved.map((player) => player.slot)).toEqual([
+      "C", "1B", "2B", "SS", "3B", "LF", "CF", "RF", "DH",
+    ]);
+
+    saved.forEach((player, index) => {
+      const { rolls, ...rolled } = lineup[index];
+      expect(player).toMatchObject({
+        ...rolled,
+        leagueId,
+        teamId: teamIds[0],
+        naturalPosition: rolled.slot,
+        breakthroughUsed: false,
+      });
+      expect(player.rolls).toHaveLength(rolls.length);
+      expect(player.rolls).toEqual(
+        expect.arrayContaining(rolls.map((roll) => ({ ...roll, source: "app" }))),
+      );
+    });
+  });
+
+  it("saves eight players for a lineup without a DH", async () => {
+    await createPositionPlayers(leagueId, teamIds[0], namedLineup(300, false), database);
+    const saved = await listTeamPositionPlayers(leagueId, teamIds[0], database);
+    expect(saved).toHaveLength(8);
+    expect(saved.some((player) => player.slot === "DH")).toBe(false);
+  });
+
+  it("does nothing when the team already has position players", async () => {
+    await createPositionPlayers(leagueId, teamIds[0], namedLineup(300), database);
+    const before = await listTeamPositionPlayers(leagueId, teamIds[0], database);
+
+    const result = await createPositionPlayers(
+      leagueId,
+      teamIds[0],
+      namedLineup(400),
+      database,
+    );
+
+    expect(result).toEqual({ created: false });
+    expect(await listTeamPositionPlayers(leagueId, teamIds[0], database)).toEqual(before);
+  });
+
+  it("keeps pitchers and position players on one team apart", async () => {
+    await createPitchingStaff(leagueId, teamIds[0], namedStaff(100), database);
+    const pitchersBefore = await listTeamPitchers(leagueId, teamIds[0], database);
+
+    const result = await createPositionPlayers(
+      leagueId,
+      teamIds[0],
+      namedLineup(300),
+      database,
+    );
+
+    expect(result).toEqual({ created: true });
+    expect(await listTeamPitchers(leagueId, teamIds[0], database)).toEqual(pitchersBefore);
+    expect(await listTeamPositionPlayers(leagueId, teamIds[0], database)).toHaveLength(9);
+    expect(await listUsedNameIds(leagueId, database)).toHaveLength(20);
+  });
+
+  it("rejects a name already used by a pitcher and saves none of the lineup", async () => {
+    await createPitchingStaff(leagueId, teamIds[0], namedStaff(100), database);
+
+    // Ids 105 to 113 are all held by the pitchers.
+    await expect(
+      createPositionPlayers(leagueId, teamIds[0], namedLineup(105), database),
+    ).rejects.toThrow();
+    expect(await listTeamPositionPlayers(leagueId, teamIds[0], database)).toEqual([]);
+  });
+});
+
+describe("countPlayersByTeam", () => {
+  it("counts pitchers and position players for each team with players", async () => {
+    const other = await addLeague("Sun Belt League");
+    await createPitchingStaff(leagueId, teamIds[0], namedStaff(100), database);
+    await createPositionPlayers(leagueId, teamIds[0], namedLineup(300), database);
+    await createPositionPlayers(leagueId, teamIds[1], namedLineup(400, false), database);
+    await createPitchingStaff(other.leagueId, other.teamIds[0], namedStaff(100), database);
+
+    const counts = await countPlayersByTeam(leagueId, database);
+    expect(counts).toHaveLength(2);
+    expect(counts).toEqual(
+      expect.arrayContaining([
+        { teamId: teamIds[0], pitchers: 11, positionPlayers: 9 },
+        { teamId: teamIds[1], pitchers: 0, positionPlayers: 8 },
+      ]),
+    );
+  });
+
+  it("is empty for a league with no players", async () => {
+    expect(await countPlayersByTeam(leagueId, database)).toEqual([]);
   });
 });

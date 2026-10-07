@@ -41,8 +41,9 @@ export const teams = sqliteTable(
   ],
 );
 
-// One table for pitchers and, from feature 4, position players. The pitcher
-// columns are always filled for a pitcher, except stamina for a reliever.
+// One table for pitchers and position players. Grade, ceiling, HR tendency
+// and stamina belong to pitchers (stamina is empty for a reliever); archetype
+// and the four grades with their ceilings belong to position players.
 export const players = sqliteTable(
   "players",
   {
@@ -61,6 +62,15 @@ export const players = sqliteTable(
     gradeCeiling: text("grade_ceiling"),
     hrTendency: text("hr_tendency"),
     stamina: integer("stamina"),
+    archetype: text("archetype"),
+    hitting: text("hitting"),
+    power: text("power"),
+    defense: text("defense"),
+    clutch: text("clutch"),
+    hittingCeiling: text("hitting_ceiling"),
+    powerCeiling: text("power_ceiling"),
+    defenseCeiling: text("defense_ceiling"),
+    clutchCeiling: text("clutch_ceiling"),
     breakthroughUsed: integer("breakthrough_used", { mode: "boolean" })
       .notNull()
       .default(false),

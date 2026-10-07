@@ -1,9 +1,12 @@
 import Link from "next/link";
 import { Suspense } from "react";
 import { Panel, PageTitle, buttonClass } from "@/components/ui";
-import { listTeams } from "@/lib/data";
+import { countPlayersByTeam, listTeams } from "@/lib/data";
 import { GM_CATEGORIES, gmQualityLabel } from "@/lib/rules/gm";
+import { rosterSize } from "@/lib/rules/roster";
 import { isTeamComplete } from "@/lib/teams/validate";
+import { generateLeagueAction } from "./actions";
+import { GenerateLeagueButton } from "./generate-league-button";
 import { loadLeague } from "./load-league";
 
 const cell = "h-7 border-b border-border px-2 text-left whitespace-nowrap";
@@ -12,6 +15,13 @@ const heading = `${cell} bg-surface-2 text-xs font-semibold tracking-wide text-m
 async function LeagueHome({ params }: { params: Promise<{ leagueId: string }> }) {
   const league = await loadLeague(params);
   const teams = await listTeams(league.id);
+  const playerCounts = new Map(
+    (await countPlayersByTeam(league.id)).map((entry) => [
+      entry.teamId,
+      entry.pitchers + entry.positionPlayers,
+    ]),
+  );
+  const fullRoster = rosterSize(league.useDh);
   const setupHref = `/leagues/${league.id}/teams`;
 
   return (
@@ -22,9 +32,16 @@ async function LeagueHome({ params }: { params: Promise<{ leagueId: string }> })
           league.useDh ? "DH league" : "No DH"
         }`}
         actions={
-          <Link href={setupHref} className={buttonClass.primary}>
-            Set up teams
-          </Link>
+          <>
+            {teams.length > 0 && (
+              <GenerateLeagueButton
+                action={generateLeagueAction.bind(null, league.id)}
+              />
+            )}
+            <Link href={setupHref} className={buttonClass.primary}>
+              Set up teams
+            </Link>
+          </>
         }
       />
       <Panel title="League settings">
@@ -62,6 +79,9 @@ async function LeagueHome({ params }: { params: Promise<{ leagueId: string }> })
                   <th scope="col" className={heading}>
                     Status
                   </th>
+                  <th scope="col" className={heading}>
+                    Roster
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -92,6 +112,9 @@ async function LeagueHome({ params }: { params: Promise<{ leagueId: string }> })
                       </td>
                       <td className={cell}>
                         {isTeamComplete(team) ? "Complete" : "Incomplete"}
+                      </td>
+                      <td className={`${cell} font-mono`}>
+                        {playerCounts.get(team.id) ?? 0} of {fullRoster}
                       </td>
                     </tr>
                   );

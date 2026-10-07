@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { NEW_TEAM_AGE_TABLE } from "./age";
 import { D66_RESULTS, lookupD66, type D66Row } from "./dice";
 import { GRADES, gradeValue } from "./grades";
 import {
   CL_STAMINA_TABLE,
-  PITCHER_AGE_TABLE,
   PITCHER_GRADE_TABLE,
   PITCHER_HR_TENDENCY_TABLE,
   PITCHER_SLOTS,
@@ -26,7 +26,7 @@ function dice(...results: number[]) {
 }
 
 const tables: Record<string, readonly D66Row<string | number>[]> = {
-  age: PITCHER_AGE_TABLE,
+  age: NEW_TEAM_AGE_TABLE,
   grade: PITCHER_GRADE_TABLE,
   "HR tendency": PITCHER_HR_TENDENCY_TABLE,
   "SP stamina": SP_STAMINA_TABLE,
@@ -51,13 +51,13 @@ describe("pitcher tables", () => {
   );
 
   it("matches the handbook at range edges", () => {
-    expect(lookupD66(PITCHER_AGE_TABLE, 11)).toBe(21);
-    expect(lookupD66(PITCHER_AGE_TABLE, 16)).toBe(24);
-    expect(lookupD66(PITCHER_AGE_TABLE, 34)).toBe(27);
-    expect(lookupD66(PITCHER_AGE_TABLE, 35)).toBe(28);
-    expect(lookupD66(PITCHER_AGE_TABLE, 42)).toBe(28);
-    expect(lookupD66(PITCHER_AGE_TABLE, 65)).toBe(34);
-    expect(lookupD66(PITCHER_AGE_TABLE, 66)).toBe(35);
+    expect(lookupD66(NEW_TEAM_AGE_TABLE, 11)).toBe(21);
+    expect(lookupD66(NEW_TEAM_AGE_TABLE, 16)).toBe(24);
+    expect(lookupD66(NEW_TEAM_AGE_TABLE, 34)).toBe(27);
+    expect(lookupD66(NEW_TEAM_AGE_TABLE, 35)).toBe(28);
+    expect(lookupD66(NEW_TEAM_AGE_TABLE, 42)).toBe(28);
+    expect(lookupD66(NEW_TEAM_AGE_TABLE, 65)).toBe(34);
+    expect(lookupD66(NEW_TEAM_AGE_TABLE, 66)).toBe(35);
 
     expect(lookupD66(PITCHER_GRADE_TABLE, 12)).toBe("F");
     expect(lookupD66(PITCHER_GRADE_TABLE, 13)).toBe("D");

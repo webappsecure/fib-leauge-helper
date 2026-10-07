@@ -3,10 +3,20 @@ import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { GradeBadge } from "@/components/grade";
 import { Panel, PageTitle } from "@/components/ui";
-import { getTeam, listTeamPitchers, type Pitcher } from "@/lib/data";
-import { hrTendencyLabel, type PitcherAttribute } from "@/lib/rules/pitchers";
+import {
+  getTeam,
+  listTeamPitchers,
+  listTeamPositionPlayers,
+  type Pitcher,
+  type PlayerRoll,
+  type PositionPlayer,
+} from "@/lib/data";
+import { hrTendencyLabel } from "@/lib/rules/pitchers";
+import { GRADE_ATTRIBUTES } from "@/lib/rules/positions";
+import { rosterSize } from "@/lib/rules/roster";
 import { loadLeague } from "../../load-league";
-import { RollStaffButton } from "./roll-staff-button";
+import { rollPitchingStaffAction, rollPositionPlayersAction } from "./actions";
+import { RollButton } from "./roll-button";
 
 type Params = Promise<{ leagueId: string; teamId: string }>;
 
@@ -14,14 +24,23 @@ const cell = "h-7 border-b border-border px-2 text-left whitespace-nowrap";
 const heading = `${cell} bg-surface-2 text-xs font-semibold tracking-wide text-muted uppercase`;
 const centered = "text-center";
 
-// The dice behind a rolled value, shown beside it.
-function Dice({ pitcher, attribute }: { pitcher: Pitcher; attribute: PitcherAttribute }) {
-  const roll = pitcher.rolls.find((entry) => entry.attribute === attribute);
-  if (!roll) return null;
+// The dice behind a rolled value, shown beside it. A value that took two
+// rolls, such as an archetype with an Elite check, shows both in order.
+function Dice({
+  rolls,
+  attributes,
+}: {
+  rolls: PlayerRoll[];
+  attributes: PlayerRoll["attribute"][];
+}) {
+  const dice = attributes.flatMap(
+    (attribute) => rolls.find((roll) => roll.attribute === attribute)?.dice ?? [],
+  );
+  if (dice.length === 0) return null;
   return (
     <span className="ml-1 font-mono text-xs text-faint">
       <span className="sr-only">rolled </span>
-      {roll.dice}
+      {dice.join(", ")}
     </span>
   );
 }
@@ -37,22 +56,22 @@ function PitcherRow({ pitcher }: { pitcher: Pitcher }) {
       </td>
       <td className={`${cell} ${centered} font-mono`}>
         {pitcher.age}
-        <Dice pitcher={pitcher} attribute="age" />
+        <Dice rolls={pitcher.rolls} attributes={["age"]} />
       </td>
       <td className={`${cell} ${centered}`}>
         <GradeBadge grade={pitcher.grade} />
-        <Dice pitcher={pitcher} attribute="grade" />
+        <Dice rolls={pitcher.rolls} attributes={["grade"]} />
       </td>
       <td className={`${cell} ${centered} font-mono text-sm text-faint`}>
         {pitcher.gradeCeiling}
       </td>
       <td className={cell}>
         {hrTendencyLabel(pitcher.hrTendency)}
-        <Dice pitcher={pitcher} attribute="hrTendency" />
+        <Dice rolls={pitcher.rolls} attributes={["hrTendency"]} />
       </td>
       <td className={`${cell} ${centered} font-mono`}>
         {pitcher.stamina}
-        <Dice pitcher={pitcher} attribute="stamina" />
+        <Dice rolls={pitcher.rolls} attributes={["stamina"]} />
       </td>
     </tr>
   );
@@ -116,6 +135,78 @@ function PitchingStaff({ pitchers }: { pitchers: Pitcher[] }) {
   );
 }
 
+const shortHeadings = [
+  { label: "H", title: "Hitting" },
+  { label: "P", title: "Power" },
+  { label: "D", title: "Defense" },
+  { label: "CL", title: "Clutch" },
+];
+
+function Lineup({ players }: { players: PositionPlayer[] }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full border-collapse">
+        <thead>
+          <tr>
+            <th scope="col" className={heading}>
+              Pos
+            </th>
+            <th scope="col" className={heading}>
+              Name
+            </th>
+            <th scope="col" className={`${heading} ${centered}`}>
+              <abbr title="Archetype" className="no-underline">
+                Arc
+              </abbr>
+            </th>
+            <th scope="col" className={`${heading} ${centered}`}>
+              Age
+            </th>
+            {shortHeadings.map(({ label, title }) => (
+              <th key={label} scope="col" className={`${heading} ${centered}`}>
+                <abbr title={title} className="no-underline">
+                  {label}
+                </abbr>
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {players.map((player) => (
+            <tr key={player.id} className="hover:bg-surface-2">
+              <th
+                scope="row"
+                className={`${cell} w-11 font-mono text-sm font-normal text-muted`}
+              >
+                {player.slot}
+              </th>
+              <td className={`${cell} font-semibold`}>
+                {player.name ?? (
+                  <span className="font-normal text-faint">Unnamed</span>
+                )}
+              </td>
+              <td className={`${cell} ${centered} font-mono`}>
+                {player.archetype}
+                <Dice rolls={player.rolls} attributes={["archetype", "eliteCheck"]} />
+              </td>
+              <td className={`${cell} ${centered} font-mono`}>
+                {player.age}
+                <Dice rolls={player.rolls} attributes={["age"]} />
+              </td>
+              {GRADE_ATTRIBUTES.map((attribute) => (
+                <td key={attribute} className={`${cell} ${centered}`}>
+                  <GradeBadge grade={player[attribute]} />
+                  <Dice rolls={player.rolls} attributes={[attribute]} />
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 async function TeamSheet({ params }: { params: Params }) {
   const league = await loadLeague(params);
   const { teamId } = await params;
@@ -126,6 +217,8 @@ async function TeamSheet({ params }: { params: Params }) {
   if (!team) notFound();
 
   const pitchers = await listTeamPitchers(league.id, team.id);
+  const positionPlayers = await listTeamPositionPlayers(league.id, team.id);
+  const playerCount = pitchers.length + positionPlayers.length;
   const title =
     [team.city, team.name].filter(Boolean).join(" ") || `Team ${team.number}`;
 
@@ -140,7 +233,9 @@ async function TeamSheet({ params }: { params: Params }) {
       </nav>
       <PageTitle
         title={title}
-        meta={`${league.startYear} season · ${league.useDh ? "DH league" : "No DH"}`}
+        meta={`${league.startYear} season · ${playerCount} of ${rosterSize(league.useDh)} players · ${
+          league.useDh ? "DH league" : "No DH"
+        }`}
       />
       <Panel title="Pitching staff">
         {pitchers.length === 0 ? (
@@ -148,10 +243,28 @@ async function TeamSheet({ params }: { params: Params }) {
             <p className="text-muted">
               No pitchers have been rolled for this team yet.
             </p>
-            <RollStaffButton leagueId={league.id} teamId={team.id} />
+            <RollButton
+              label="Roll pitching staff"
+              action={rollPitchingStaffAction.bind(null, league.id, team.id)}
+            />
           </div>
         ) : (
           <PitchingStaff pitchers={pitchers} />
+        )}
+      </Panel>
+      <Panel title="Position players">
+        {positionPlayers.length === 0 ? (
+          <div className="grid justify-items-start gap-3 p-3">
+            <p className="text-muted">
+              No position players have been rolled for this team yet.
+            </p>
+            <RollButton
+              label="Roll position players"
+              action={rollPositionPlayersAction.bind(null, league.id, team.id)}
+            />
+          </div>
+        ) : (
+          <Lineup players={positionPlayers} />
         )}
       </Panel>
     </>

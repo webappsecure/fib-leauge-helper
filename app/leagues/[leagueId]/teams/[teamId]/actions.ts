@@ -1,16 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { getLeague, getTeam } from "@/lib/data";
 import {
-  createPitchingStaff,
-  getLeague,
-  getTeam,
-  listUsedNameIds,
-} from "@/lib/data";
-import { pickName } from "@/lib/rules/names";
-import { rollPitchingStaff } from "@/lib/rules/pitchers";
+  generatePitchingStaff,
+  generatePositionPlayers,
+} from "@/lib/rosters/generate";
 
-export type RollStaffResult = { ok: true } | { ok: false; error: string };
+export type RollResult = { ok: true } | { ok: false; error: string };
 
 const TEAM_NOT_FOUND =
   "This team could not be found. Go back to the league and open the team again.";
@@ -19,29 +16,36 @@ function isId(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 }
 
+// Both ids come from the browser, so the league and team are reloaded here.
+async function loadTeam(leagueId: unknown, teamId: unknown) {
+  const league = isId(leagueId) ? await getLeague(leagueId) : null;
+  const team = league && isId(teamId) ? await getTeam(league.id, teamId) : null;
+  return league && team ? { league, team } : null;
+}
+
+// In both actions a team that already has the players is left as it is, so a
+// double press or a stale tab still ends on the saved roster.
+
 export async function rollPitchingStaffAction(
   leagueId: unknown,
   teamId: unknown,
-): Promise<RollStaffResult> {
-  // Both ids come from the browser, so the league and team are reloaded here.
-  const league = isId(leagueId) ? await getLeague(leagueId) : null;
-  const team = league && isId(teamId) ? await getTeam(league.id, teamId) : null;
-  if (!league || !team) return { ok: false, error: TEAM_NOT_FOUND };
+): Promise<RollResult> {
+  const found = await loadTeam(leagueId, teamId);
+  if (!found) return { ok: false, error: TEAM_NOT_FOUND };
 
-  const usedNames = new Set(await listUsedNameIds(league.id));
-  const staff = rollPitchingStaff().map((pitcher) => {
-    const name = pickName(usedNames);
-    if (name) usedNames.add(name.id);
-    return {
-      ...pitcher,
-      name: name?.fullName ?? null,
-      nameListId: name?.id ?? null,
-    };
-  });
+  await generatePitchingStaff(found.league.id, found.team.id);
+  revalidatePath(`/leagues/${found.league.id}/teams/${found.team.id}`);
+  return { ok: true };
+}
 
-  // A team that already has a staff is left as it is, so a double press or a
-  // stale tab still ends on the saved staff.
-  await createPitchingStaff(league.id, team.id, staff);
-  revalidatePath(`/leagues/${league.id}/teams/${team.id}`);
+export async function rollPositionPlayersAction(
+  leagueId: unknown,
+  teamId: unknown,
+): Promise<RollResult> {
+  const found = await loadTeam(leagueId, teamId);
+  if (!found) return { ok: false, error: TEAM_NOT_FOUND };
+
+  await generatePositionPlayers(found.league, found.team.id);
+  revalidatePath(`/leagues/${found.league.id}/teams/${found.team.id}`);
   return { ok: true };
 }
