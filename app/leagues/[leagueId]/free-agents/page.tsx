@@ -53,6 +53,11 @@ function Pitchers({ pitchers }: { pitchers: FreeAgentPitcher[] }) {
             <th scope="col" className={`${heading} ${centered}`}>
               Grade
             </th>
+            <th scope="col" className={`${heading} ${centered}`}>
+              <abbr title="Grade ceiling" className="no-underline">
+                Ceil
+              </abbr>
+            </th>
             <th scope="col" className={heading}>
               <abbr title="Home run tendency" className="no-underline">
                 HR tend
@@ -75,6 +80,9 @@ function Pitchers({ pitchers }: { pitchers: FreeAgentPitcher[] }) {
               <td className={`${cell} ${centered}`}>
                 <GradeBadge grade={pitcher.grade} />
                 <Dice rolls={pitcher.rolls} attributes={["grade"]} />
+              </td>
+              <td className={`${cell} ${centered} font-mono text-sm text-faint`}>
+                {pitcher.gradeCeiling}
               </td>
               <td className={cell}>
                 {hrTendencyLabel(pitcher.hrTendency)}
@@ -128,7 +136,7 @@ function PositionPlayers({ players }: { players: FreeAgentPositionPlayer[] }) {
               <NameCell name={player.name} />
               <td className={`${cell} ${centered} font-mono`}>
                 {player.archetype}
-                <Dice rolls={player.rolls} attributes={["archetype"]} />
+                <Dice rolls={player.rolls} attributes={["archetype", "eliteCheck"]} />
               </td>
               <td className={`${cell} ${centered} font-mono`}>
                 {player.age}
@@ -166,7 +174,7 @@ async function FreeAgents({ params }: { params: Promise<{ leagueId: string }> })
       </nav>
       <PageTitle
         title="Free agents"
-        meta={`${total} in the pool · a free agent's grades are also their ceilings`}
+        meta={`${total} in the pool`}
       />
       <Panel title="Generate free agents">
         <GenerateForm

@@ -6,12 +6,21 @@ import {
   generatePitchingStaff,
   generatePositionPlayers,
 } from "@/lib/rosters/generate";
+import {
+  listMoveTargets,
+  swapTeamPlayer,
+  type MoveTargetGroup,
+} from "@/lib/rosters/moves";
 import { drawPlayerName, renameTeam, setPlayerName } from "@/lib/rosters/rename";
 import { rerollPlayer, rerollTeam } from "@/lib/rosters/reroll";
 import { isId } from "../../../action-input";
 
 export type RollResult = { ok: true } | { ok: false; error: string };
 export type NameResult = { ok: true; name: string } | { ok: false; error: string };
+export type MoveTargetsResult =
+  | { ok: true; groups: MoveTargetGroup[] }
+  | { ok: false; error: string };
+export type SwapResult = { ok: true; message: string } | { ok: false; error: string };
 
 const TEAM_NOT_FOUND =
   "This team could not be found. Go back to the league and open the team again.";
@@ -19,6 +28,9 @@ const NO_PLAYERS = "This team has no players to re-roll yet.";
 const NO_PLAYERS_TO_RENAME = "This team has no players to rename yet.";
 const PLAYER_NOT_FOUND =
   "This player is no longer on this team. Reload the page and try again.";
+
+const TARGET_NOT_FOUND =
+  "One of these players is no longer where this page shows them. Reload the page and try again.";
 
 // Both ids come from the browser, so the league and team are reloaded here.
 async function loadTeam(leagueId: unknown, teamId: unknown) {
@@ -150,4 +162,46 @@ export async function renameTeamAction(
 
   revalidatePath(`/leagues/${found.league.id}/teams/${found.team.id}`);
   return { ok: true };
+}
+
+// Lists who the player may swap with: teammates, free agents and players on
+// other teams.
+export async function moveTargetsAction(
+  leagueId: unknown,
+  teamId: unknown,
+  playerId: unknown,
+): Promise<MoveTargetsResult> {
+  const found = await loadTeam(leagueId, teamId);
+  if (!found) return { ok: false, error: TEAM_NOT_FOUND };
+  if (!isId(playerId)) return { ok: false, error: PLAYER_NOT_FOUND };
+
+  const groups = await listMoveTargets(found.league.id, found.team.id, playerId);
+  return groups ? { ok: true, groups } : { ok: false, error: PLAYER_NOT_FOUND };
+}
+
+// Makes the player trade places with the target. The target id comes from a
+// list the browser was sent earlier, so the move is checked again on the
+// server against where both players are now.
+export async function swapPlayersAction(
+  leagueId: unknown,
+  teamId: unknown,
+  playerId: unknown,
+  targetId: unknown,
+): Promise<SwapResult> {
+  const found = await loadTeam(leagueId, teamId);
+  if (!found) return { ok: false, error: TEAM_NOT_FOUND };
+  if (!isId(playerId)) return { ok: false, error: PLAYER_NOT_FOUND };
+  if (!isId(targetId)) return { ok: false, error: TARGET_NOT_FOUND };
+
+  const result = await swapTeamPlayer(found.league.id, found.team.id, playerId, targetId);
+  if (!result.ok) {
+    return {
+      ok: false,
+      error: result.reason === "not-found" ? TARGET_NOT_FOUND : result.error,
+    };
+  }
+
+  // The league home, both team sheets and the free agent screen show rosters.
+  revalidatePath("/leagues/[leagueId]", "layout");
+  return { ok: true, message: result.message };
 }

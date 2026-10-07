@@ -5,13 +5,17 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openDatabase, type Database } from "../data/db";
 import { createLeague } from "../data/leagues";
 import {
+  addFreeAgents,
   createPitchingStaff,
   createPositionPlayers,
+  listFreeAgents,
   listTeamPitchers,
   listTeamPositionPlayers,
+  swapPlayers,
 } from "../data/players";
 import { listTeams, saveTeams } from "../data/teams";
 import { DEFAULT_BALLPARK_QUALITY } from "../rules/ballpark";
+import { rollFreeAgentPositionPlayer } from "../rules/free-agents";
 import { rollPitcher, rollPitchingStaff } from "../rules/pitchers";
 import { rollLineup, rollPositionPlayer } from "../rules/positions";
 import { rerollPlayer, rerollTeam } from "./reroll";
@@ -206,6 +210,43 @@ describe("rerollPlayer", () => {
       "position.archetype.SS",
     );
     expect(after.rolls).toEqual(saved(expected.rolls));
+  });
+
+  it("re-rolls an outfielder signed from the pool on the outfield tables", async () => {
+    const center = (await listTeamPositionPlayers(leagueId, teamIds[0], database)).find(
+      (player) => player.slot === "CF",
+    );
+    if (!center) throw new Error("no CF");
+    await addFreeAgents(
+      leagueId,
+      1,
+      [{ kind: "position", rolled: rollFreeAgentPositionPlayer("OF"), name: "Free Agent", nameListId: 900 }],
+      database,
+    );
+    const [agent] = (await listFreeAgents(leagueId, database)).positionPlayers;
+    expect((await swapPlayers(leagueId, center.id, agent.id, database)).ok).toBe(true);
+
+    // Outfield archetype 53 is a slugger; on the catcher table it would not be.
+    expect(
+      await rerollPlayer(leagueId, teamIds[0], agent.id, dice(53, 31, 45, 32, 35, 51), database),
+    ).toBe(true);
+
+    const signed = (await listTeamPositionPlayers(leagueId, teamIds[0], database)).find(
+      (player) => player.id === agent.id,
+    );
+    expect(signed).toMatchObject({
+      slot: "CF",
+      naturalPosition: "OF",
+      name: "Free Agent",
+      archetype: "HK",
+    });
+    expect(signed?.rolls).toContainEqual({
+      attribute: "archetype",
+      tableKey: "position.archetype.OF",
+      dice: "53",
+      result: "HK",
+      source: "app",
+    });
   });
 
   it("gives a different player each time it is pressed", async () => {

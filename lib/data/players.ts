@@ -1,12 +1,17 @@
 import { and, count, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import {
   FREE_AGENT_POSITIONS,
-  type FreeAgentArchetype,
-  type FreeAgentFieldPosition,
   type FreeAgentPosition,
   type RolledFreeAgentPositionPlayer,
 } from "../rules/free-agents";
 import type { Grade } from "../rules/grades";
+import {
+  moveProblem,
+  poolPosition,
+  type FieldPosition,
+  type MoveProblem,
+  type PlayerPlace,
+} from "../rules/moves";
 import {
   orderStarters,
   PITCHER_SLOTS,
@@ -61,7 +66,8 @@ export type Pitcher = PlayerBase & {
 
 export type PositionPlayer = PlayerBase & {
   slot: LineupSlot;
-  naturalPosition: LineupSlot;
+  // `OF` for a player signed from the free agent pool as an outfielder.
+  naturalPosition: FieldPosition;
   archetype: Archetype;
   hitting: Grade;
   power: Grade;
@@ -317,7 +323,7 @@ export function createPositionPlayers(
 
 export type TeamPlayer =
   | { id: number; kind: "pitcher"; naturalPosition: PitcherRole }
-  | { id: number; kind: "position"; naturalPosition: LineupSlot };
+  | { id: number; kind: "position"; naturalPosition: FieldPosition };
 
 // What a re-roll needs to know about a player. Returns null when the player
 // does not exist or belongs to another team or league.
@@ -657,8 +663,9 @@ export function replacePositionPlayerValues(
   );
 }
 
-// A free agent is a player with no team and no slot. Their rolled grades are
-// also their ceilings.
+// A free agent is a player with no team and no slot. One rolled for the pool
+// has ceilings equal to their grades; one released from a team keeps the
+// values and ceilings they had there.
 type FreeAgentBase = PersonBase & { teamId: null; slot: null };
 
 export type FreeAgentPitcher = FreeAgentBase & {
@@ -670,8 +677,9 @@ export type FreeAgentPitcher = FreeAgentBase & {
 };
 
 export type FreeAgentPositionPlayer = FreeAgentBase & {
-  naturalPosition: FreeAgentFieldPosition;
-  archetype: FreeAgentArchetype;
+  // An outfielder is `OF`. A released natural DH keeps `DH`.
+  naturalPosition: Exclude<FieldPosition, "LF" | "CF" | "RF">;
+  archetype: Archetype;
   hitting: Grade;
   power: Grade;
   defense: Grade;
@@ -692,7 +700,8 @@ const isFreeAgent = (leagueId: number) =>
   and(eq(players.leagueId, leagueId), isNull(players.teamId), isNull(players.slot));
 
 // The league's free agents with their dice, in pool position order and then
-// in the order they were created.
+// in the order they were created. A released natural DH has no pool position
+// and comes last.
 export async function listFreeAgents(
   leagueId: number,
   database?: Database,
@@ -702,8 +711,10 @@ export async function listFreeAgents(
     db,
     await db.select().from(players).where(isFreeAgent(leagueId)),
   );
-  const place = (row: { naturalPosition: string }) =>
-    FREE_AGENT_POSITIONS.indexOf(row.naturalPosition as FreeAgentPosition);
+  const place = (row: { naturalPosition: string }) => {
+    const index = FREE_AGENT_POSITIONS.indexOf(row.naturalPosition as FreeAgentPosition);
+    return index === -1 ? FREE_AGENT_POSITIONS.length : index;
+  };
   rows.sort((a, b) => place(a) - place(b) || a.id - b.id);
   return {
     pitchers: rows.filter((row) => row.kind === "pitcher") as unknown as FreeAgentPitcher[],
@@ -769,5 +780,106 @@ export async function addFreeAgents(
       created += 1;
     }
     return { created };
+  });
+}
+
+// The three pitcher values are what starters are ranked by; they are null
+// for a position player, and stamina is null for a reliever.
+export type LeaguePlayerPlace = PlayerPlace & {
+  name: string | null;
+  grade: Grade | null;
+  hrTendency: HrTendency | null;
+  stamina: number | null;
+};
+
+// Where every player in the league is: their team and slot, or neither for a
+// free agent.
+export async function listLeaguePlayerPlaces(
+  leagueId: number,
+  database?: Database,
+): Promise<LeaguePlayerPlace[]> {
+  const db = database ?? (await getDatabase());
+  const rows = await db
+    .select({
+      id: players.id,
+      leagueId: players.leagueId,
+      teamId: players.teamId,
+      slot: players.slot,
+      kind: players.kind,
+      naturalPosition: players.naturalPosition,
+      name: players.name,
+      grade: players.grade,
+      hrTendency: players.hrTendency,
+      stamina: players.stamina,
+    })
+    .from(players)
+    .where(eq(players.leagueId, leagueId));
+  return rows as LeaguePlayerPlace[];
+}
+
+export type SwapResult =
+  | { ok: true; teamIds: number[] }
+  | { ok: false; problem: MoveProblem | { reason: "not-found" } };
+
+// Makes two players trade places: each takes the other's team and slot, and
+// one who had neither goes to the free agent pool. The move is checked
+// against the rows as they are now, and a refused swap writes nothing.
+// Nothing else about either player changes, except that an outfielder sent
+// to the pool is stored as `OF`.
+export async function swapPlayers(
+  leagueId: number,
+  playerAId: number,
+  playerBId: number,
+  database?: Database,
+): Promise<SwapResult> {
+  const db = database ?? (await getDatabase());
+  return db.transaction(async (tx) => {
+    const rows = (await tx
+      .select({
+        id: players.id,
+        leagueId: players.leagueId,
+        teamId: players.teamId,
+        slot: players.slot,
+        kind: players.kind,
+        naturalPosition: players.naturalPosition,
+      })
+      .from(players)
+      .where(
+        and(eq(players.leagueId, leagueId), inArray(players.id, [playerAId, playerBId])),
+      )) as PlayerPlace[];
+    const a = rows.find((row) => row.id === playerAId);
+    const b = rows.find((row) => row.id === playerBId);
+    if (!a || !b) return { ok: false, problem: { reason: "not-found" } };
+
+    const problem = moveProblem(a, b);
+    if (problem) return { ok: false, problem };
+
+    // Cleared first so the two never hold one team slot at the same moment.
+    await tx
+      .update(players)
+      .set({ slot: null })
+      .where(inArray(players.id, [a.id, b.id]));
+    for (const [player, place] of [
+      [a, b],
+      [b, a],
+    ] as const) {
+      await tx
+        .update(players)
+        .set({
+          teamId: place.teamId,
+          slot: place.slot,
+          naturalPosition:
+            place.teamId === null
+              ? poolPosition(player.naturalPosition)
+              : player.naturalPosition,
+        })
+        .where(eq(players.id, player.id));
+    }
+
+    const teamIds = [...new Set([a.teamId, b.teamId])].filter((id) => id !== null);
+    if (a.naturalPosition === "SP") {
+      for (const teamId of teamIds) await reorderStarters(tx, leagueId, teamId);
+    }
+    return { ok: true, teamIds };
   });
 }

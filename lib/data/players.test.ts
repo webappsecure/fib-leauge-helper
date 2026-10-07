@@ -27,6 +27,7 @@ import {
   getTeamPlayer,
   listFreeAgents,
   listLeaguePlayerNames,
+  listLeaguePlayerPlaces,
   listLeagueRosterGrades,
   renamePlayer,
   renameTeamPlayers,
@@ -36,6 +37,7 @@ import {
   replacePitcherValues,
   replacePositionPlayerValues,
   replaceTeamValues,
+  swapPlayers,
   listTeamPlayerIds,
   type NewFreeAgent,
   type NewPitcher,
@@ -1043,5 +1045,301 @@ describe("free agents", () => {
       });
       expect(Number(result.rows[0].total)).toBe(0);
     }
+  });
+});
+
+describe("swapPlayers", () => {
+  // Every column of the named players and all their rolls, straight from the
+  // database.
+  async function snapshot(...ids: number[]) {
+    const marks = ids.map(() => "?").join(", ");
+    const rows = await database.$client.execute({
+      sql: `SELECT * FROM players WHERE id IN (${marks}) ORDER BY id`,
+      args: ids,
+    });
+    const rolls = await database.$client.execute({
+      sql: `SELECT * FROM rolls WHERE player_id IN (${marks}) ORDER BY id`,
+      args: ids,
+    });
+    return {
+      players: rows.rows.map((row) => ({ ...row })),
+      rolls: rolls.rows.map((row) => ({ ...row })),
+    };
+  }
+
+  // The same snapshot with the columns a swap may rewrite taken out.
+  async function unmoved(...ids: number[]) {
+    const { players, rolls } = await snapshot(...ids);
+    return {
+      rolls,
+      players: players.map((row) => {
+        const rest: Record<string, unknown> = { ...row };
+        delete rest.team_id;
+        delete rest.slot;
+        delete rest.natural_position;
+        return rest;
+      }),
+    };
+  }
+
+  async function bothTeams() {
+    for (const [index, teamId] of teamIds.entries()) {
+      await createPitchingStaff(leagueId, teamId, namedStaff(1 + index * 100), database);
+      await createPositionPlayers(leagueId, teamId, namedLineup(50 + index * 100), database);
+    }
+  }
+
+  const hitter = async (teamIndex: number, slot: string) => {
+    const lineup = await listTeamPositionPlayers(leagueId, teamIds[teamIndex], database);
+    const found = lineup.find((player) => player.slot === slot);
+    if (!found) throw new Error(`no ${slot}`);
+    return found;
+  };
+
+  const pitcher = async (teamIndex: number, slot: string) => {
+    const staff = await listTeamPitchers(leagueId, teamIds[teamIndex], database);
+    const found = staff.find((entry) => entry.slot === slot);
+    if (!found) throw new Error(`no ${slot}`);
+    return found;
+  };
+
+  async function freeAgent(position: "SP" | "RP" | "C" | "1B" | "SS" | "OF", nameListId: number) {
+    const named = { name: `Free Agent ${nameListId}`, nameListId };
+    await addFreeAgents(
+      leagueId,
+      99,
+      [
+        position === "SP" || position === "RP"
+          ? { ...named, kind: "pitcher", rolled: rollFreeAgentPitcher(position) }
+          : { ...named, kind: "position", rolled: rollFreeAgentPositionPlayer(position) },
+      ],
+      database,
+    );
+    const pool = await listFreeAgents(leagueId, database);
+    const found = [...pool.pitchers, ...pool.positionPlayers].find(
+      (agent) => agent.nameListId === nameListId,
+    );
+    if (!found) throw new Error("free agent not saved");
+    return found;
+  }
+
+  const place = async (id: number) => {
+    const found = (await listLeaguePlayerPlaces(leagueId, database)).find(
+      (entry) => entry.id === id,
+    );
+    if (!found) throw new Error(`no player ${id}`);
+    return { teamId: found.teamId, slot: found.slot, naturalPosition: found.naturalPosition };
+  };
+
+  it("exchanges slots on one team and changes nothing else", async () => {
+    await bothTeams();
+    const first = await hitter(0, "1B");
+    const third = await hitter(0, "3B");
+    const before = await unmoved(first.id, third.id);
+    const others = await snapshot(...(await listTeamPlayerIds(leagueId, teamIds[1], database)).map((p) => p.id));
+
+    expect(await swapPlayers(leagueId, first.id, third.id, database)).toEqual({
+      ok: true,
+      teamIds: [teamIds[0]],
+    });
+
+    expect(await place(first.id)).toEqual({ teamId: teamIds[0], slot: "3B", naturalPosition: "1B" });
+    expect(await place(third.id)).toEqual({ teamId: teamIds[0], slot: "1B", naturalPosition: "3B" });
+    expect(await unmoved(first.id, third.id)).toEqual(before);
+    expect(
+      await snapshot(...(await listTeamPlayerIds(leagueId, teamIds[1], database)).map((p) => p.id)),
+    ).toEqual(others);
+    expect(await listTeamPositionPlayers(leagueId, teamIds[0], database)).toHaveLength(9);
+  });
+
+  it("trades two players between teams", async () => {
+    await bothTeams();
+    const left = await hitter(0, "LF");
+    const center = await hitter(1, "CF");
+    const before = await unmoved(left.id, center.id);
+
+    expect(await swapPlayers(leagueId, left.id, center.id, database)).toEqual({
+      ok: true,
+      teamIds: [teamIds[0], teamIds[1]],
+    });
+
+    expect(await place(left.id)).toEqual({ teamId: teamIds[1], slot: "CF", naturalPosition: "LF" });
+    expect(await place(center.id)).toEqual({ teamId: teamIds[0], slot: "LF", naturalPosition: "CF" });
+    expect(await unmoved(left.id, center.id)).toEqual(before);
+    for (const teamId of teamIds) {
+      expect(await countPlayersByTeam(leagueId, database)).toContainEqual({
+        teamId,
+        pitchers: 11,
+        positionPlayers: 9,
+      });
+    }
+  });
+
+  it("signs a free agent into the slot and releases the team player to the pool", async () => {
+    await bothTeams();
+    const shortstop = await hitter(0, "SS");
+    const agent = await freeAgent("SS", 900);
+    const before = await unmoved(shortstop.id, agent.id);
+
+    // Either player may be named first.
+    expect(await swapPlayers(leagueId, agent.id, shortstop.id, database)).toEqual({
+      ok: true,
+      teamIds: [teamIds[0]],
+    });
+
+    expect(await place(agent.id)).toEqual({ teamId: teamIds[0], slot: "SS", naturalPosition: "SS" });
+    expect(await place(shortstop.id)).toEqual({ teamId: null, slot: null, naturalPosition: "SS" });
+    // Name, values, ceilings and rolls all go with the player.
+    expect(await unmoved(shortstop.id, agent.id)).toEqual(before);
+
+    const pool = await listFreeAgents(leagueId, database);
+    expect(pool.positionPlayers.map((player) => player.id)).toEqual([shortstop.id]);
+    expect(pool.positionPlayers[0]).toMatchObject({
+      name: shortstop.name,
+      hitting: shortstop.hitting,
+      hittingCeiling: shortstop.hittingCeiling,
+      rolls: expect.arrayContaining(shortstop.rolls),
+    });
+    expect((await hitter(0, "SS")).id).toBe(agent.id);
+  });
+
+  it.each(["LF", "CF", "RF"])("stores a released %s as an OF who counts toward the pool", async (slot) => {
+    await bothTeams();
+    const outfielder = await hitter(0, slot);
+    const agent = await freeAgent("OF", 900);
+
+    expect((await swapPlayers(leagueId, outfielder.id, agent.id, database)).ok).toBe(true);
+
+    expect(await place(outfielder.id)).toEqual({ teamId: null, slot: null, naturalPosition: "OF" });
+    // The signed outfielder keeps the pool's one outfield position.
+    expect(await place(agent.id)).toEqual({ teamId: teamIds[0], slot, naturalPosition: "OF" });
+    expect(await countFreeAgentsByPosition(leagueId, database)).toEqual(new Map([["OF", 1]]));
+  });
+
+  it("lists a released natural DH after every pool position", async () => {
+    await bothTeams();
+    const dh = await hitter(0, "DH");
+    const agent = await freeAgent("C", 900);
+    await freeAgent("OF", 901);
+
+    expect((await swapPlayers(leagueId, dh.id, agent.id, database)).ok).toBe(true);
+
+    const pool = await listFreeAgents(leagueId, database);
+    expect(pool.positionPlayers.map((player) => player.naturalPosition)).toEqual(["OF", "DH"]);
+    expect(await place(agent.id)).toEqual({ teamId: teamIds[0], slot: "DH", naturalPosition: "C" });
+  });
+
+  it("refuses an illegal swap and changes no row", async () => {
+    await bothTeams();
+    const catcher = await hitter(0, "C");
+    const shortstop = await hitter(1, "SS");
+    const starter = await pitcher(0, "SP1");
+    const reliever = await pitcher(0, "RP1");
+    const agent = await freeAgent("1B", 900);
+    const ids = [catcher.id, shortstop.id, starter.id, reliever.id, agent.id];
+    const before = await snapshot(...ids);
+
+    expect(await swapPlayers(leagueId, catcher.id, shortstop.id, database)).toEqual({
+      ok: false,
+      problem: { reason: "cannot-fill", playerId: catcher.id, naturalPosition: "C", slot: "SS" },
+    });
+    expect(await swapPlayers(leagueId, catcher.id, agent.id, database)).toEqual({
+      ok: false,
+      problem: { reason: "cannot-fill", playerId: agent.id, naturalPosition: "1B", slot: "C" },
+    });
+    expect(await swapPlayers(leagueId, starter.id, reliever.id, database)).toEqual({
+      ok: false,
+      problem: { reason: "different-roles" },
+    });
+    expect(await swapPlayers(leagueId, starter.id, catcher.id, database)).toEqual({
+      ok: false,
+      problem: { reason: "different-kinds" },
+    });
+    expect(await swapPlayers(leagueId, starter.id, (await pitcher(0, "SP2")).id, database)).toEqual({
+      ok: false,
+      problem: { reason: "same-team-starters" },
+    });
+    expect(await swapPlayers(leagueId, catcher.id, catcher.id, database)).toEqual({
+      ok: false,
+      problem: { reason: "same-player" },
+    });
+    expect(await snapshot(...ids)).toEqual(before);
+  });
+
+  it("refuses a missing player and a player from another league", async () => {
+    await bothTeams();
+    const other = await addLeague("Sun Belt League");
+    await createPositionPlayers(other.leagueId, other.teamIds[0], namedLineup(50), database);
+    const catcher = await hitter(0, "C");
+    const [outsider] = await listTeamPositionPlayers(other.leagueId, other.teamIds[0], database);
+    const before = await snapshot(catcher.id, outsider.id);
+
+    const notFound = { ok: false, problem: { reason: "not-found" } };
+    expect(await swapPlayers(leagueId, catcher.id, outsider.id, database)).toEqual(notFound);
+    expect(await swapPlayers(leagueId, outsider.id, catcher.id, database)).toEqual(notFound);
+    expect(await swapPlayers(leagueId, catcher.id, 999999, database)).toEqual(notFound);
+    // Asked for through the wrong league, the right pair is still refused.
+    expect(await swapPlayers(other.leagueId, catcher.id, outsider.id, database)).toEqual(notFound);
+    expect(await snapshot(catcher.id, outsider.id)).toEqual(before);
+  });
+
+  it("swaps relievers on one team and closers between teams", async () => {
+    await bothTeams();
+    const first = await pitcher(0, "RP1");
+    const fourth = await pitcher(0, "RP4");
+    expect((await swapPlayers(leagueId, first.id, fourth.id, database)).ok).toBe(true);
+    expect((await pitcher(0, "RP1")).id).toBe(fourth.id);
+    expect((await pitcher(0, "RP4")).id).toBe(first.id);
+
+    const closer = await pitcher(0, "CL");
+    const theirs = await pitcher(1, "CL");
+    expect((await swapPlayers(leagueId, closer.id, theirs.id, database)).ok).toBe(true);
+    expect((await pitcher(0, "CL")).id).toBe(theirs.id);
+    expect((await pitcher(1, "CL")).id).toBe(closer.id);
+  });
+
+  it("leaves both teams' starters best first after trading a starter", async () => {
+    const grades: Grade[] = ["A+", "A", "B+", "B", "C", "D"];
+    const graded = (firstNameId: number, order: Grade[]) =>
+      namedStaff(firstNameId).map((entry) => {
+        const index = STARTER_SLOTS.indexOf(entry.slot);
+        return index === -1
+          ? entry
+          : { ...entry, grade: order[index], hrTendency: "neutral" as const, stamina: 6 };
+      });
+    await createPitchingStaff(leagueId, teamIds[0], graded(1, grades), database);
+    await createPitchingStaff(leagueId, teamIds[1], graded(100, grades), database);
+
+    // The best starter on one team for the worst on the other.
+    const ace = await pitcher(0, "SP1");
+    const worst = await pitcher(1, "SP6");
+    expect(await swapPlayers(leagueId, ace.id, worst.id, database)).toEqual({
+      ok: true,
+      teamIds: [teamIds[0], teamIds[1]],
+    });
+
+    const starterGrades = async (teamIndex: number) =>
+      (await listTeamPitchers(leagueId, teamIds[teamIndex], database))
+        .filter((entry) => entry.naturalPosition === "SP")
+        .map((entry) => entry.grade);
+    expect(await starterGrades(0)).toEqual(["A", "B+", "B", "C", "D", "D"]);
+    expect(await starterGrades(1)).toEqual(["A+", "A+", "A", "B+", "B", "C"]);
+    expect((await pitcher(1, "SP1")).id === ace.id || (await pitcher(1, "SP2")).id === ace.id).toBe(true);
+    expect((await pitcher(0, "SP5")).id === worst.id || (await pitcher(0, "SP6")).id === worst.id).toBe(true);
+  });
+
+  it("signs a free agent starter and puts the staff back in order", async () => {
+    await createPitchingStaff(leagueId, teamIds[0], namedStaff(1), database);
+    const agent = await freeAgent("SP", 900);
+    const released = await pitcher(0, "SP3");
+
+    expect((await swapPlayers(leagueId, released.id, agent.id, database)).ok).toBe(true);
+
+    const staff = await listTeamPitchers(leagueId, teamIds[0], database);
+    const starters = staff.filter((entry) => entry.naturalPosition === "SP");
+    expect(starters).toHaveLength(6);
+    expect(starters.map((entry) => entry.id)).toContain(agent.id);
+    expect(starters.map((entry) => entry.id)).toEqual(orderStarters(starters).map((entry) => entry.id));
+    expect(await place(released.id)).toEqual({ teamId: null, slot: null, naturalPosition: "SP" });
   });
 });

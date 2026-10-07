@@ -8,6 +8,7 @@ vi.mock("@/lib/rosters/generate", () => ({
   generatePositionPlayers: vi.fn(),
 }));
 vi.mock("@/lib/rosters/reroll", () => ({ rerollPlayer: vi.fn(), rerollTeam: vi.fn() }));
+vi.mock("@/lib/rosters/moves", () => ({ listMoveTargets: vi.fn(), swapTeamPlayer: vi.fn() }));
 vi.mock("@/lib/rosters/rename", () => ({
   drawPlayerName: vi.fn(),
   renameTeam: vi.fn(),
@@ -16,14 +17,17 @@ vi.mock("@/lib/rosters/rename", () => ({
 
 import { revalidatePath } from "next/cache";
 import { getLeague, getTeam } from "@/lib/data";
+import { listMoveTargets, swapTeamPlayer } from "@/lib/rosters/moves";
 import { drawPlayerName, renameTeam, setPlayerName } from "@/lib/rosters/rename";
 import { rerollPlayer, rerollTeam } from "@/lib/rosters/reroll";
 import {
+  moveTargetsAction,
   randomPlayerNameAction,
   renamePlayerAction,
   renameTeamAction,
   rerollPlayerAction,
   rerollTeamAction,
+  swapPlayersAction,
 } from "./actions";
 
 const league = { id: 3, name: "Great Lakes League", startYear: 2026, teamCount: 2, useDh: true, createdAt: "" };
@@ -246,5 +250,124 @@ describe("renameTeamAction", () => {
       error: expect.stringContaining("team"),
     });
     expect(renameTeam).not.toHaveBeenCalled();
+  });
+});
+
+describe("moveTargetsAction", () => {
+  it("lists the targets for a player on the reloaded team", async () => {
+    const groups = [{ label: "This team", targets: [{ id: 13, label: "3B  Ray Ortiz" }] }];
+    vi.mocked(listMoveTargets).mockResolvedValue(groups);
+
+    expect(await moveTargetsAction(3, 7, 12)).toEqual({ ok: true, groups });
+    expect(getTeam).toHaveBeenCalledWith(3, 7);
+    expect(listMoveTargets).toHaveBeenCalledWith(3, 7, 12);
+  });
+
+  it("refuses bad player ids and a player who is not on the team", async () => {
+    for (const playerId of badIds) {
+      expect(await moveTargetsAction(3, 7, playerId)).toMatchObject({
+        ok: false,
+        error: expect.stringContaining("player"),
+      });
+    }
+    expect(listMoveTargets).not.toHaveBeenCalled();
+
+    vi.mocked(listMoveTargets).mockResolvedValue(null);
+    expect(await moveTargetsAction(3, 7, 12)).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("player"),
+    });
+  });
+
+  it("refuses an unknown league or team without listing", async () => {
+    for (const [leagueId, teamId] of [
+      ["3", 7],
+      [3, "7"],
+      [0, 7],
+      [3, null],
+    ]) {
+      expect(await moveTargetsAction(leagueId, teamId, 12)).toMatchObject({
+        ok: false,
+        error: expect.stringContaining("team"),
+      });
+    }
+    vi.mocked(getTeam).mockResolvedValue(null);
+    expect(await moveTargetsAction(3, 99, 12)).toMatchObject({ ok: false });
+    vi.mocked(getLeague).mockResolvedValue(null);
+    expect(await moveTargetsAction(99, 7, 12)).toMatchObject({ ok: false });
+    expect(listMoveTargets).not.toHaveBeenCalled();
+  });
+});
+
+describe("swapPlayersAction", () => {
+  it("swaps on the reloaded team and refreshes every page under the league", async () => {
+    vi.mocked(swapTeamPlayer).mockResolvedValue({ ok: true, message: "Swapped with Ray Ortiz." });
+
+    expect(await swapPlayersAction(3, 7, 12, 40)).toEqual({
+      ok: true,
+      message: "Swapped with Ray Ortiz.",
+    });
+    expect(getTeam).toHaveBeenCalledWith(3, 7);
+    expect(swapTeamPlayer).toHaveBeenCalledWith(3, 7, 12, 40);
+    expect(revalidatePath).toHaveBeenCalledWith("/leagues/[leagueId]", "layout");
+  });
+
+  it("refuses bad player and target ids without swapping", async () => {
+    for (const bad of badIds) {
+      expect(await swapPlayersAction(3, 7, bad, 40)).toMatchObject({
+        ok: false,
+        error: expect.stringContaining("player"),
+      });
+      expect(await swapPlayersAction(3, 7, 12, bad)).toMatchObject({
+        ok: false,
+        error: expect.stringContaining("players"),
+      });
+    }
+    expect(swapTeamPlayer).not.toHaveBeenCalled();
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("refuses an unknown league or team without swapping", async () => {
+    for (const [leagueId, teamId] of [
+      ["3", 7],
+      [3, "7"],
+      [-1, 7],
+      [3, undefined],
+    ]) {
+      expect(await swapPlayersAction(leagueId, teamId, 12, 40)).toMatchObject({
+        ok: false,
+        error: expect.stringContaining("team"),
+      });
+    }
+    vi.mocked(getTeam).mockResolvedValue(null);
+    expect(await swapPlayersAction(3, 99, 12, 40)).toMatchObject({ ok: false });
+    vi.mocked(getLeague).mockResolvedValue(null);
+    expect(await swapPlayersAction(99, 7, 12, 40)).toMatchObject({ ok: false });
+    expect(swapTeamPlayer).not.toHaveBeenCalled();
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("passes on the reason an illegal swap was refused and does not refresh", async () => {
+    vi.mocked(swapTeamPlayer).mockResolvedValue({
+      ok: false,
+      reason: "refused",
+      error: "Ray Ortiz is a natural C and cannot play SS.",
+    });
+
+    expect(await swapPlayersAction(3, 7, 12, 40)).toEqual({
+      ok: false,
+      error: "Ray Ortiz is a natural C and cannot play SS.",
+    });
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("reports a player who has moved and does not refresh", async () => {
+    vi.mocked(swapTeamPlayer).mockResolvedValue({ ok: false, reason: "not-found" });
+
+    expect(await swapPlayersAction(3, 7, 12, 40)).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("Reload the page"),
+    });
+    expect(revalidatePath).not.toHaveBeenCalled();
   });
 });

@@ -9,7 +9,14 @@ import {
 import type { Database } from "../data/db";
 import type { RandomSource } from "../rules/dice";
 import { rollPitcher } from "../rules/pitchers";
+import type { FieldPosition } from "../rules/moves";
 import { rollPositionPlayer } from "../rules/positions";
+
+// A player signed from the pool as an outfielder has no one outfield slot.
+// The three outfield slots share an archetype table, so any of them will do.
+function rollForPosition(naturalPosition: FieldPosition, random: RandomSource) {
+  return rollPositionPlayer(naturalPosition === "OF" ? "LF" : naturalPosition, random);
+}
 
 // Rolls all of a player's values again, exactly as a new player is rolled,
 // on the tables for the position the player was first rolled for. The name
@@ -36,7 +43,7 @@ export async function rerollPlayer(
         leagueId,
         teamId,
         playerId,
-        rollPositionPlayer(player.naturalPosition, random),
+        rollForPosition(player.naturalPosition, random),
         database,
       );
 }
@@ -62,7 +69,7 @@ export async function rerollTeam(
       : {
           playerId: player.id,
           kind: "position",
-          rolled: rollPositionPlayer(player.naturalPosition, random),
+          rolled: rollForPosition(player.naturalPosition, random),
         },
   );
   await replaceTeamValues(leagueId, teamId, entries, database);

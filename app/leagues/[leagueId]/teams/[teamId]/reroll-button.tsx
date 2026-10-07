@@ -7,14 +7,25 @@ import type { RollResult } from "./actions";
 // Rolls one player's values again. There is no confirmation: the point is to
 // press it as often as it takes.
 export function RerollButton({
+  playerId,
   player,
   action,
 }: {
+  playerId: number;
   player: string;
   action: () => Promise<RollResult>;
 }) {
   const [rolling, startRolling] = useTransition();
   const [outcome, setOutcome] = useState<RollResult | null>(null);
+
+  // The row keeps this button when a re-roll or a swap changes who is in it,
+  // so focus and the "Re-rolled" note survive a change in the starter order.
+  // An error is about the player who was here, so it goes when they do.
+  const [shownFor, setShownFor] = useState(playerId);
+  if (shownFor !== playerId) {
+    setShownFor(playerId);
+    if (outcome && !outcome.ok) setOutcome(null);
+  }
 
   // The note is cleared after a moment so it cannot sit beside values that a
   // later whole-team re-roll has since replaced.

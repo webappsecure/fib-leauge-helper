@@ -17,12 +17,14 @@ import {
   SP_FINDER_RANGES,
   type PositionFinders,
 } from "@/lib/rules/finders";
+import { naturalMarker } from "@/lib/rules/moves";
 import { hrTendencyLabel, orderStarters, STARTER_SLOTS } from "@/lib/rules/pitchers";
 import { GRADE_ATTRIBUTES } from "@/lib/rules/positions";
 import { bullpenQualities, teamQualities } from "@/lib/rules/qualities";
 import { rosterSize } from "@/lib/rules/roster";
 import { loadLeague } from "../../load-league";
 import {
+  moveTargetsAction,
   randomPlayerNameAction,
   renamePlayerAction,
   renameTeamAction,
@@ -30,7 +32,9 @@ import {
   rerollTeamAction,
   rollPitchingStaffAction,
   rollPositionPlayersAction,
+  swapPlayersAction,
 } from "./actions";
+import { MoveControl } from "./move-control";
 import { PlayerName } from "./player-name";
 import { RerollButton } from "./reroll-button";
 import { RollButton } from "./roll-button";
@@ -47,7 +51,10 @@ function NameCell({ player }: { player: Pitcher | PositionPlayer }) {
   const ids = [player.leagueId, player.teamId, player.id] as const;
   return (
     <td className={`${cell} font-semibold`}>
+      {/* Keyed by player: the row is keyed by slot, and a name being typed
+          for one player must not carry over to whoever is swapped in. */}
       <PlayerName
+        key={player.id}
         slot={player.slot}
         name={player.name}
         rename={renamePlayerAction.bind(null, ...ids)}
@@ -57,13 +64,26 @@ function NameCell({ player }: { player: Pitcher | PositionPlayer }) {
   );
 }
 
-function RerollCell({ player }: { player: Pitcher | PositionPlayer }) {
+// Re-roll and Move for one player. Both act on the player's id, whatever
+// slot the row shows.
+function ActionsCell({ player }: { player: Pitcher | PositionPlayer }) {
+  const ids = [player.leagueId, player.teamId, player.id] as const;
+  const label = `${player.slot} ${player.name ?? "unnamed player"}`;
   return (
     <td className={`${cell} text-right`}>
-      <RerollButton
-        player={`${player.slot} ${player.name ?? "unnamed player"}`}
-        action={rerollPlayerAction.bind(null, player.leagueId, player.teamId, player.id)}
-      />
+      <div className="flex items-center justify-end gap-2">
+        <RerollButton
+          playerId={player.id}
+          player={label}
+          action={rerollPlayerAction.bind(null, ...ids)}
+        />
+        <MoveControl
+          playerId={player.id}
+          player={label}
+          loadTargets={moveTargetsAction.bind(null, ...ids)}
+          swap={swapPlayersAction.bind(null, ...ids)}
+        />
+      </div>
     </td>
   );
 }
@@ -78,9 +98,9 @@ function FinderCell({ range }: { range: string | null | undefined }) {
   );
 }
 
-const rerollHeading = (
+const actionsHeading = (
   <th scope="col" className={heading}>
-    <span className="sr-only">Re-roll</span>
+    <span className="sr-only">Re-roll and move</span>
   </th>
 );
 
@@ -111,7 +131,7 @@ function PitcherRow({ pitcher }: { pitcher: Pitcher }) {
         <Dice rolls={pitcher.rolls} attributes={["stamina"]} />
       </td>
       <FinderCell range={SP_FINDER_RANGES[pitcher.slot]} />
-      <RerollCell player={pitcher} />
+      <ActionsCell player={pitcher} />
     </tr>
   );
 }
@@ -162,12 +182,14 @@ function PitchingStaff({ pitchers }: { pitchers: Pitcher[] }) {
                 Finder
               </abbr>
             </th>
-            {rerollHeading}
+            {actionsHeading}
           </tr>
         </thead>
         <tbody>
+          {/* Rows are keyed by slot, not player, so a row's Move control stays
+              mounted to report a swap that changes who is in the row. */}
           {starters.map((pitcher) => (
-            <PitcherRow key={pitcher.id} pitcher={pitcher} />
+            <PitcherRow key={pitcher.slot} pitcher={pitcher} />
           ))}
         </tbody>
         <tbody>
@@ -177,7 +199,7 @@ function PitchingStaff({ pitchers }: { pitchers: Pitcher[] }) {
             </th>
           </tr>
           {bullpen.map((pitcher) => (
-            <PitcherRow key={pitcher.id} pitcher={pitcher} />
+            <PitcherRow key={pitcher.slot} pitcher={pitcher} />
           ))}
         </tbody>
       </table>
@@ -248,38 +270,46 @@ function Lineup({
                 HR finder
               </abbr>
             </th>
-            {rerollHeading}
+            {actionsHeading}
           </tr>
         </thead>
         <tbody>
-          {players.map((player) => (
-            <tr key={player.id} className="hover:bg-surface-2">
-              <th
-                scope="row"
-                className={`${cell} w-11 font-mono text-sm font-normal text-muted`}
-              >
-                {player.slot}
-              </th>
-              <NameCell player={player} />
-              <td className={`${cell} ${centered} font-mono`}>
-                {player.archetype}
-                <Dice rolls={player.rolls} attributes={["archetype", "eliteCheck"]} />
-              </td>
-              <td className={`${cell} ${centered} font-mono`}>
-                {player.age}
-                <Dice rolls={player.rolls} attributes={["age"]} />
-              </td>
-              {GRADE_ATTRIBUTES.map((attribute) => (
-                <td key={attribute} className={`${cell} ${centered}`}>
-                  <GradeBadge grade={player[attribute]} />
-                  <Dice rolls={player.rolls} attributes={[attribute]} />
+          {players.map((player) => {
+            const natural = naturalMarker(player.naturalPosition, player.slot);
+            return (
+              <tr key={player.slot} className="hover:bg-surface-2">
+                <th
+                  scope="row"
+                  className={`${cell} w-11 font-mono text-sm font-normal text-muted`}
+                >
+                  {player.slot}
+                  {natural && (
+                    <span className="ml-1 text-xs text-faint">
+                      <span className="sr-only">natural position </span>({natural})
+                    </span>
+                  )}
+                </th>
+                <NameCell player={player} />
+                <td className={`${cell} ${centered} font-mono`}>
+                  {player.archetype}
+                  <Dice rolls={player.rolls} attributes={["archetype", "eliteCheck"]} />
                 </td>
-              ))}
-              <FinderCell range={rangeFor("clutch", player.slot)} />
-              <FinderCell range={rangeFor("homeRun", player.slot)} />
-              <RerollCell player={player} />
-            </tr>
-          ))}
+                <td className={`${cell} ${centered} font-mono`}>
+                  {player.age}
+                  <Dice rolls={player.rolls} attributes={["age"]} />
+                </td>
+                {GRADE_ATTRIBUTES.map((attribute) => (
+                  <td key={attribute} className={`${cell} ${centered}`}>
+                    <GradeBadge grade={player[attribute]} />
+                    <Dice rolls={player.rolls} attributes={[attribute]} />
+                  </td>
+                ))}
+                <FinderCell range={rangeFor("clutch", player.slot)} />
+                <FinderCell range={rangeFor("homeRun", player.slot)} />
+                <ActionsCell player={player} />
+              </tr>
+            );
+          })}
           {other && (
             <tr className="hover:bg-surface-2">
               <th

@@ -15,6 +15,7 @@ export {
   getTeamPlayer,
   listFreeAgents,
   listLeaguePlayerNames,
+  listLeaguePlayerPlaces,
   listLeagueRosterGrades,
   listTeamPitchers,
   listTeamPlayerIds,
@@ -25,10 +26,12 @@ export {
   replacePitcherValues,
   replacePositionPlayerValues,
   replaceTeamValues,
+  swapPlayers,
 } from "./players";
 export type {
   FreeAgentPitcher,
   FreeAgentPositionPlayer,
+  LeaguePlayerPlace,
   NamedPlayer,
   NewFreeAgent,
   NewPitcher,
@@ -39,6 +42,7 @@ export type {
   PositionPlayer,
   RosterGrades,
   RerolledPlayer,
+  SwapResult,
   TeamPlayer,
   TeamPlayerCount,
 } from "./players";
