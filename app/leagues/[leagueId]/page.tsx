@@ -9,9 +9,9 @@ import {
   listTeams,
   type RosterGrades,
 } from "@/lib/data";
-import { GM_CATEGORIES, gmQualityLabel } from "@/lib/rules/gm";
 import {
   bullpenQualities,
+  closerQualities,
   teamQualities,
   type TeamQuality,
 } from "@/lib/rules/qualities";
@@ -39,13 +39,16 @@ function qualityCell(quality: TeamQuality) {
   );
 }
 
-// The five quality columns for one team, worked out from its current roster.
+// The quality and closer columns for one team, worked out from its current
+// roster.
 function QualityCells({ roster, useDh }: { roster: RosterGrades[]; useDh: boolean }) {
   const team = teamQualities(
     roster.filter((player) => player.kind === "position"),
     useDh,
   );
-  const bullpen = bullpenQualities(roster.filter((player) => player.kind === "pitcher"));
+  const pitchers = roster.filter((player) => player.kind === "pitcher");
+  const bullpen = bullpenQualities(pitchers);
+  const closer = closerQualities(pitchers);
   return (
     <>
       {qualityCell(team.scoring)}
@@ -55,6 +58,12 @@ function QualityCells({ roster, useDh }: { roster: RosterGrades[]; useDh: boolea
         {bullpen.grade.available ? <GradeBadge grade={bullpen.grade.grade} /> : notYet}
       </td>
       {qualityCell(bullpen.hrTendency)}
+      <td className={`${cell} ${centered}`}>
+        {closer ? <GradeBadge grade={closer.grade} /> : notYet}
+      </td>
+      <td className={`${cell} ${centered}`}>
+        {closer ? <QualityBadge {...closer.hrTendency} /> : notYet}
+      </td>
     </>
   );
 }
@@ -124,9 +133,6 @@ async function LeagueHome({ params }: { params: Promise<{ leagueId: string }> })
                   <th scope="col" className={heading}>
                     Team
                   </th>
-                  <th scope="col" className={heading}>
-                    GM style
-                  </th>
                   <th scope="col" className={`${heading} ${centered}`}>
                     Scoring
                   </th>
@@ -146,6 +152,16 @@ async function LeagueHome({ params }: { params: Promise<{ leagueId: string }> })
                       BP HR tend
                     </abbr>
                   </th>
+                  <th scope="col" className={`${heading} ${centered}`}>
+                    <abbr title="Closer grade" className="no-underline">
+                      CL grade
+                    </abbr>
+                  </th>
+                  <th scope="col" className={`${heading} ${centered}`}>
+                    <abbr title="Closer home run tendency" className="no-underline">
+                      CL HR tend
+                    </abbr>
+                  </th>
                   <th scope="col" className={heading}>
                     Status
                   </th>
@@ -156,9 +172,6 @@ async function LeagueHome({ params }: { params: Promise<{ leagueId: string }> })
               </thead>
               <tbody>
                 {teams.map((team) => {
-                  const gmStyle = GM_CATEGORIES.map((category) =>
-                    gmQualityLabel(category, team[category]),
-                  ).filter(Boolean);
                   return (
                     <tr key={team.id} className="hover:bg-surface-2">
                       <td className={`${cell} font-mono text-muted`}>
@@ -177,9 +190,6 @@ async function LeagueHome({ params }: { params: Promise<{ leagueId: string }> })
                         </Link>
                       </td>
                       <td className={cell}>{team.name}</td>
-                      <td className={`${cell} text-muted`}>
-                        {gmStyle.length > 0 ? gmStyle.join(" · ") : "GM not set"}
-                      </td>
                       <QualityCells
                         roster={rosters.get(team.id) ?? []}
                         useDh={league.useDh}

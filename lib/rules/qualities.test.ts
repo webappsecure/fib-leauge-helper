@@ -3,6 +3,7 @@ import { GRADES, type Grade } from "./grades";
 import type { HrTendency } from "./pitchers";
 import {
   bullpenQualities,
+  closerQualities,
   teamQualities,
   type BullpenPitcher,
   type LineupGrades,
@@ -243,5 +244,41 @@ describe("bullpen qualities", () => {
     const missing = { available: false, reason: "Needs four relief pitchers" };
     expect(bullpenQualities(pen(["B", "B", "B"], neutral))).toEqual({ grade: missing, hrTendency: missing });
     expect(bullpenQualities([])).toEqual({ grade: missing, hrTendency: missing });
+  });
+});
+
+describe("closer qualities", () => {
+  const staff = (closer?: BullpenPitcher): BullpenPitcher[] => [
+    { slot: "SP1", grade: "A+", hrTendency: "tough" },
+    { slot: "RP1", grade: "F", hrTendency: "shaky" },
+    ...(closer ? [closer] : []),
+    { slot: "RP2", grade: "D", hrTendency: "semi-shaky" },
+  ];
+
+  it("gives each HR tendency its tone and label", () => {
+    const tendencies: HrTendency[] = ["shaky", "semi-shaky", "neutral", "semi-tough", "tough"];
+    expect(
+      tendencies.map(
+        (hrTendency) => closerQualities(staff({ slot: "CL", grade: "B", hrTendency }))?.hrTendency,
+      ),
+    ).toEqual([
+      { tone: "low", label: "SHAKY" },
+      { tone: "semi-low", label: "SHAKY•" },
+      { tone: "neutral", label: "neutral" },
+      { tone: "semi-high", label: "TOUGH•" },
+      { tone: "high", label: "TOUGH" },
+    ]);
+  });
+
+  it("passes the closer's own grade through, found by slot among the staff", () => {
+    expect(closerQualities(staff({ slot: "CL", grade: "B+", hrTendency: "neutral" }))).toEqual({
+      grade: "B+",
+      hrTendency: { tone: "neutral", label: "neutral" },
+    });
+  });
+
+  it("gives nothing when nobody is in the CL slot", () => {
+    expect(closerQualities(staff())).toBeNull();
+    expect(closerQualities([])).toBeNull();
   });
 });

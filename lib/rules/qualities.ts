@@ -113,6 +113,32 @@ export function teamQualities(lineup: LineupGrades[], useDh: boolean): TeamQuali
 
 export type BullpenPitcher = { slot: string; grade: Grade; hrTendency: HrTendency };
 
+// HR_TENDENCIES runs SHAKY to TOUGH, the same worst-to-best order as the
+// tones, so a tendency's place in it (1 to 5) picks its tone and label.
+function tendencyQuality(value: number) {
+  return { tone: QUALITY_TONES[value - 1], label: HR_TENDENCIES[value - 1].label };
+}
+
+const tendencyValue = (tendency: HrTendency) =>
+  HR_TENDENCIES.findIndex((entry) => entry.value === tendency) + 1;
+
+export type CloserQualities = {
+  grade: Grade;
+  hrTendency: { tone: QualityTone; label: string };
+};
+
+// The pitcher in the CL slot now, or null when nobody is. The closer stands
+// alone: it never counts toward the bullpen qualities.
+export function closerQualities(pitchers: BullpenPitcher[]): CloserQualities | null {
+  const closer = pitchers.find((pitcher) => pitcher.slot === "CL");
+  return closer
+    ? {
+        grade: closer.grade,
+        hrTendency: tendencyQuality(tendencyValue(closer.hrTendency)),
+      }
+    : null;
+}
+
 export type BullpenQualities = { grade: BullpenGrade; hrTendency: TeamQuality };
 
 const RELIEF_SLOTS = ["RP1", "RP2", "RP3", "RP4"];
@@ -141,8 +167,7 @@ export function bullpenQualities(pitchers: BullpenPitcher[]): BullpenQualities {
   const grade = average(gradeSum);
 
   const tendencySum = full.reduce(
-    (sum, pitcher) =>
-      sum + HR_TENDENCIES.findIndex((entry) => entry.value === pitcher.hrTendency) + 1,
+    (sum, pitcher) => sum + tendencyValue(pitcher.hrTendency),
     0,
   );
   const tendency = average(tendencySum);
@@ -156,9 +181,7 @@ export function bullpenQualities(pitchers: BullpenPitcher[]): BullpenQualities {
     },
     hrTendency: {
       available: true,
-      // HR_TENDENCIES runs SHAKY to TOUGH, the same worst-to-best order.
-      tone: QUALITY_TONES[tendency.rounded - 1],
-      label: HR_TENDENCIES[tendency.rounded - 1].label,
+      ...tendencyQuality(tendency.rounded),
       sum: tendencySum,
       working: tendency.working,
     },
