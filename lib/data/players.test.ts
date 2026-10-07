@@ -2,17 +2,22 @@ import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { PITCHER_SLOTS, rollPitchingStaff } from "../rules/pitchers";
-import { rollLineup } from "../rules/positions";
+import { PITCHER_SLOTS, rollPitcher, rollPitchingStaff } from "../rules/pitchers";
+import { rollLineup, rollPositionPlayer } from "../rules/positions";
 import { openDatabase, type Database } from "./db";
 import { createLeague } from "./leagues";
 import {
   countPlayersByTeam,
   createPitchingStaff,
   createPositionPlayers,
+  getTeamPlayer,
   listTeamPitchers,
   listTeamPositionPlayers,
   listUsedNameIds,
+  replacePitcherValues,
+  replacePositionPlayerValues,
+  replaceTeamValues,
+  listTeamPlayerIds,
   type NewPitcher,
   type NewPositionPlayer,
 } from "./players";
@@ -302,5 +307,220 @@ describe("countPlayersByTeam", () => {
 
   it("is empty for a league with no players", async () => {
     expect(await countPlayersByTeam(leagueId, database)).toEqual([]);
+  });
+});
+
+describe("re-rolling a player", () => {
+  const asSaved = (rolls: { attribute: string }[]) =>
+    expect.arrayContaining(rolls.map((roll) => ({ ...roll, source: "app" })));
+
+  // Keeps rolling until the catcher does or does not need an Elite check.
+  function catcher(withEliteCheck: boolean) {
+    for (let attempt = 0; attempt < 10000; attempt += 1) {
+      const player = rollPositionPlayer("C");
+      const has = player.rolls.some((roll) => roll.attribute === "eliteCheck");
+      if (has === withEliteCheck) return player;
+    }
+    throw new Error("no such catcher rolled");
+  }
+
+  beforeEach(async () => {
+    await createPitchingStaff(leagueId, teamIds[0], namedStaff(100), database);
+    await createPositionPlayers(leagueId, teamIds[0], namedLineup(200), database);
+    await createPitchingStaff(leagueId, teamIds[1], namedStaff(300), database);
+  });
+
+  it("finds a player on its own team and nowhere else", async () => {
+    const [sp1] = await listTeamPitchers(leagueId, teamIds[0], database);
+    const [catcherRow] = await listTeamPositionPlayers(leagueId, teamIds[0], database);
+    const other = await addLeague("Sun Belt League");
+
+    expect(await getTeamPlayer(leagueId, teamIds[0], sp1.id, database)).toEqual({
+      id: sp1.id,
+      kind: "pitcher",
+      naturalPosition: "SP",
+    });
+    expect(await getTeamPlayer(leagueId, teamIds[0], catcherRow.id, database)).toEqual({
+      id: catcherRow.id,
+      kind: "position",
+      naturalPosition: "C",
+    });
+    expect(await getTeamPlayer(leagueId, teamIds[1], sp1.id, database)).toBeNull();
+    expect(await getTeamPlayer(other.leagueId, teamIds[0], sp1.id, database)).toBeNull();
+    expect(await getTeamPlayer(leagueId, teamIds[0], 9999, database)).toBeNull();
+  });
+
+  it("replaces a pitcher's values and rolls and nothing else", async () => {
+    const before = await listTeamPitchers(leagueId, teamIds[0], database);
+    const otherTeam = await listTeamPitchers(leagueId, teamIds[1], database);
+    const hitters = await listTeamPositionPlayers(leagueId, teamIds[0], database);
+    const target = before[2];
+    const rolled = rollPitcher("SP");
+
+    expect(
+      await replacePitcherValues(leagueId, teamIds[0], target.id, rolled, database),
+    ).toBe(true);
+
+    const after = await listTeamPitchers(leagueId, teamIds[0], database);
+    expect(after[2]).toMatchObject({
+      id: target.id,
+      teamId: teamIds[0],
+      slot: target.slot,
+      naturalPosition: target.naturalPosition,
+      name: target.name,
+      nameListId: target.nameListId,
+      breakthroughUsed: false,
+      age: rolled.age,
+      grade: rolled.grade,
+      gradeCeiling: rolled.gradeCeiling,
+      hrTendency: rolled.hrTendency,
+      stamina: rolled.stamina,
+    });
+    expect(after[2].rolls).toHaveLength(4);
+    expect(after[2].rolls).toEqual(asSaved(rolled.rolls));
+
+    expect(after.filter((pitcher) => pitcher.id !== target.id)).toEqual(
+      before.filter((pitcher) => pitcher.id !== target.id),
+    );
+    expect(await listTeamPitchers(leagueId, teamIds[1], database)).toEqual(otherTeam);
+    expect(await listTeamPositionPlayers(leagueId, teamIds[0], database)).toEqual(hitters);
+  });
+
+  it("saves a reliever with no stamina and no stamina roll", async () => {
+    const staff = await listTeamPitchers(leagueId, teamIds[0], database);
+    const reliever = staff.find((pitcher) => pitcher.slot === "RP1")!;
+    const rolled = rollPitcher("RP");
+
+    await replacePitcherValues(leagueId, teamIds[0], reliever.id, rolled, database);
+
+    const saved = (await listTeamPitchers(leagueId, teamIds[0], database)).find(
+      (pitcher) => pitcher.id === reliever.id,
+    )!;
+    expect(saved.stamina).toBeNull();
+    expect(saved.rolls.map((roll) => roll.attribute).sort()).toEqual([
+      "age",
+      "grade",
+      "hrTendency",
+    ]);
+  });
+
+  it("replaces a position player and drops an Elite check roll that no longer applies", async () => {
+    const [target] = await listTeamPositionPlayers(leagueId, teamIds[0], database);
+    const elite = catcher(true);
+    const plain = catcher(false);
+
+    await replacePositionPlayerValues(leagueId, teamIds[0], target.id, elite, database);
+    let [saved] = await listTeamPositionPlayers(leagueId, teamIds[0], database);
+    expect(saved.rolls).toHaveLength(7);
+    expect(saved.rolls).toEqual(asSaved(elite.rolls));
+
+    await replacePositionPlayerValues(leagueId, teamIds[0], target.id, plain, database);
+    [saved] = await listTeamPositionPlayers(leagueId, teamIds[0], database);
+    expect(saved).toMatchObject({
+      id: target.id,
+      slot: "C",
+      naturalPosition: "C",
+      name: target.name,
+      nameListId: target.nameListId,
+      archetype: plain.archetype,
+      age: plain.age,
+      hitting: plain.hitting,
+      power: plain.power,
+      defense: plain.defense,
+      clutch: plain.clutch,
+      hittingCeiling: plain.hittingCeiling,
+      powerCeiling: plain.powerCeiling,
+      defenseCeiling: plain.defenseCeiling,
+      clutchCeiling: plain.clutchCeiling,
+    });
+    expect(saved.rolls).toHaveLength(6);
+    expect(saved.rolls).toEqual(asSaved(plain.rolls));
+  });
+
+  it("keeps the old values and rolls when the save fails part way", async () => {
+    const before = await listTeamPitchers(leagueId, teamIds[0], database);
+    const rolled = rollPitcher("SP");
+    // Two rolls for one attribute break the one-roll-per-attribute rule.
+    const broken = { ...rolled, rolls: [...rolled.rolls, rolled.rolls[0]] };
+
+    await expect(
+      replacePitcherValues(leagueId, teamIds[0], before[0].id, broken, database),
+    ).rejects.toThrow();
+
+    expect(await listTeamPitchers(leagueId, teamIds[0], database)).toEqual(before);
+  });
+
+  it("writes nothing for a player on another team, in another league or of the other kind", async () => {
+    const pitchers = await listTeamPitchers(leagueId, teamIds[0], database);
+    const hitters = await listTeamPositionPlayers(leagueId, teamIds[0], database);
+    const other = await addLeague("Sun Belt League");
+    const sp = rollPitcher("SP");
+
+    expect(
+      await replacePitcherValues(leagueId, teamIds[1], pitchers[0].id, sp, database),
+    ).toBe(false);
+    expect(
+      await replacePitcherValues(other.leagueId, teamIds[0], pitchers[0].id, sp, database),
+    ).toBe(false);
+    expect(
+      await replacePitcherValues(leagueId, teamIds[0], hitters[0].id, sp, database),
+    ).toBe(false);
+    expect(
+      await replacePositionPlayerValues(
+        leagueId,
+        teamIds[0],
+        pitchers[0].id,
+        catcher(false),
+        database,
+      ),
+    ).toBe(false);
+
+    expect(await listTeamPitchers(leagueId, teamIds[0], database)).toEqual(pitchers);
+    expect(await listTeamPositionPlayers(leagueId, teamIds[0], database)).toEqual(hitters);
+  });
+
+  it("lists every player on a team and none from another team", async () => {
+    const ids = await listTeamPlayerIds(leagueId, teamIds[0], database);
+    expect(ids).toHaveLength(20);
+    expect(ids.filter((player) => player.kind === "pitcher")).toHaveLength(11);
+    expect(await listTeamPlayerIds(leagueId, teamIds[1], database)).toHaveLength(11);
+    expect(await listTeamPlayerIds(leagueId + 1, teamIds[0], database)).toEqual([]);
+  });
+
+  it("replaces several players together, or none when one cannot be written", async () => {
+    const before = await listTeamPitchers(leagueId, teamIds[0], database);
+    const [otherTeamPitcher] = await listTeamPitchers(leagueId, teamIds[1], database);
+    const first = rollPitcher("SP");
+    const second = rollPitcher("SP");
+
+    await replaceTeamValues(
+      leagueId,
+      teamIds[0],
+      [
+        { playerId: before[0].id, kind: "pitcher", rolled: first },
+        { playerId: before[1].id, kind: "pitcher", rolled: second },
+      ],
+      database,
+    );
+    const after = await listTeamPitchers(leagueId, teamIds[0], database);
+    expect(after[0].rolls).toEqual(asSaved(first.rolls));
+    expect(after[1].rolls).toEqual(asSaved(second.rolls));
+    expect(after.slice(2)).toEqual(before.slice(2));
+
+    await expect(
+      replaceTeamValues(
+        leagueId,
+        teamIds[0],
+        [
+          { playerId: before[2].id, kind: "pitcher", rolled: rollPitcher("SP") },
+          { playerId: otherTeamPitcher.id, kind: "pitcher", rolled: rollPitcher("SP") },
+        ],
+        database,
+      ),
+    ).rejects.toThrow();
+    expect(await listTeamPitchers(leagueId, teamIds[0], database)).toEqual(after);
+    expect((await listTeamPitchers(leagueId, teamIds[1], database))[0]).toEqual(
+      otherTeamPitcher,
+    );
   });
 });

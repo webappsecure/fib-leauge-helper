@@ -6,6 +6,7 @@ import {
   type PitcherAttribute,
   type PitcherRole,
   type PitcherSlot,
+  type RolledPitcher,
   type StaffPitcher,
 } from "../rules/pitchers";
 import {
@@ -186,6 +187,32 @@ export async function listUsedNameIds(
 type PlayerInsert = Omit<typeof players.$inferInsert, "leagueId" | "teamId" | "kind">;
 type RollInsert = Pick<PlayerRoll, "attribute" | "tableKey" | "dice" | "result">;
 
+// The columns a roll decides, shared by creating a player and re-rolling one.
+function pitcherColumns(pitcher: RolledPitcher) {
+  return {
+    age: pitcher.age,
+    grade: pitcher.grade,
+    gradeCeiling: pitcher.gradeCeiling,
+    hrTendency: pitcher.hrTendency,
+    stamina: pitcher.stamina,
+  };
+}
+
+function positionColumns(player: RolledPositionPlayer) {
+  return {
+    archetype: player.archetype,
+    age: player.age,
+    hitting: player.hitting,
+    power: player.power,
+    defense: player.defense,
+    clutch: player.clutch,
+    hittingCeiling: player.hittingCeiling,
+    powerCeiling: player.powerCeiling,
+    defenseCeiling: player.defenseCeiling,
+    clutchCeiling: player.clutchCeiling,
+  };
+}
+
 // Saves a team's players of one kind and their rolls together. A team that
 // already has a player of that kind is left untouched, so a repeated request
 // cannot add a second set.
@@ -239,11 +266,7 @@ export function createPitchingStaff(
         naturalPosition: pitcher.role,
         name: pitcher.name,
         nameListId: pitcher.nameListId,
-        age: pitcher.age,
-        grade: pitcher.grade,
-        gradeCeiling: pitcher.gradeCeiling,
-        hrTendency: pitcher.hrTendency,
-        stamina: pitcher.stamina,
+        ...pitcherColumns(pitcher),
       },
       rolls: pitcher.rolls,
     })),
@@ -261,11 +284,188 @@ export function createPositionPlayers(
     "position",
     leagueId,
     teamId,
-    lineup.map(({ rolls: playerRolls, slot, ...player }) => ({
-      // A player's natural position is the slot they were rolled for.
-      player: { ...player, slot, naturalPosition: slot },
-      rolls: playerRolls,
+    lineup.map((player) => ({
+      player: {
+        slot: player.slot,
+        // A player's natural position is the slot they were rolled for.
+        naturalPosition: player.slot,
+        name: player.name,
+        nameListId: player.nameListId,
+        ...positionColumns(player),
+      },
+      rolls: player.rolls,
     })),
+    database,
+  );
+}
+
+export type TeamPlayer =
+  | { id: number; kind: "pitcher"; naturalPosition: PitcherRole }
+  | { id: number; kind: "position"; naturalPosition: LineupSlot };
+
+// What a re-roll needs to know about a player. Returns null when the player
+// does not exist or belongs to another team or league.
+export async function getTeamPlayer(
+  leagueId: number,
+  teamId: number,
+  playerId: number,
+  database?: Database,
+): Promise<TeamPlayer | null> {
+  const db = database ?? (await getDatabase());
+  const [row] = await db
+    .select({
+      id: players.id,
+      kind: players.kind,
+      naturalPosition: players.naturalPosition,
+    })
+    .from(players)
+    .where(
+      and(
+        eq(players.id, playerId),
+        eq(players.leagueId, leagueId),
+        eq(players.teamId, teamId),
+      ),
+    );
+  return (row as TeamPlayer | undefined) ?? null;
+}
+
+// Every player on a team, pitchers and position players alike.
+export async function listTeamPlayerIds(
+  leagueId: number,
+  teamId: number,
+  database?: Database,
+): Promise<TeamPlayer[]> {
+  const db = database ?? (await getDatabase());
+  const rows = await db
+    .select({
+      id: players.id,
+      kind: players.kind,
+      naturalPosition: players.naturalPosition,
+    })
+    .from(players)
+    .where(and(eq(players.leagueId, leagueId), eq(players.teamId, teamId)));
+  return rows as TeamPlayer[];
+}
+
+type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+type RolledColumns =
+  | ReturnType<typeof pitcherColumns>
+  | ReturnType<typeof positionColumns>;
+
+// Overwrites a player's rolled values and swaps its rolls for the new ones.
+// The name, slot, natural position and team are not touched. Returns false,
+// writing nothing, when no such player of that kind is on the team.
+async function writePlayerValues(
+  tx: Transaction,
+  kind: PlayerKind,
+  leagueId: number,
+  teamId: number,
+  playerId: number,
+  columns: RolledColumns,
+  newRolls: RollInsert[],
+): Promise<boolean> {
+  const updated = await tx
+    .update(players)
+    .set(columns)
+    .where(
+      and(
+        eq(players.id, playerId),
+        eq(players.leagueId, leagueId),
+        eq(players.teamId, teamId),
+        eq(players.kind, kind),
+      ),
+    )
+    .returning({ id: players.id });
+  if (updated.length === 0) return false;
+
+  await tx.delete(rolls).where(eq(rolls.playerId, playerId));
+  await tx.insert(rolls).values(
+    newRolls.map((roll) => ({ ...roll, leagueId, playerId, source: "app" })),
+  );
+  return true;
+}
+
+// One player, all or nothing.
+async function replacePlayerValues(
+  kind: PlayerKind,
+  leagueId: number,
+  teamId: number,
+  playerId: number,
+  columns: RolledColumns,
+  newRolls: RollInsert[],
+  database?: Database,
+): Promise<boolean> {
+  const db = database ?? (await getDatabase());
+  return db.transaction((tx) =>
+    writePlayerValues(tx, kind, leagueId, teamId, playerId, columns, newRolls),
+  );
+}
+
+export type RerolledPlayer =
+  | { playerId: number; kind: "pitcher"; rolled: RolledPitcher }
+  | { playerId: number; kind: "position"; rolled: RolledPositionPlayer };
+
+// Replaces the values of several players on one team, all or nothing: if any
+// of them cannot be written, none of them change.
+export async function replaceTeamValues(
+  leagueId: number,
+  teamId: number,
+  entries: RerolledPlayer[],
+  database?: Database,
+): Promise<void> {
+  const db = database ?? (await getDatabase());
+  await db.transaction(async (tx) => {
+    for (const entry of entries) {
+      const written = await writePlayerValues(
+        tx,
+        entry.kind,
+        leagueId,
+        teamId,
+        entry.playerId,
+        entry.kind === "pitcher"
+          ? pitcherColumns(entry.rolled)
+          : positionColumns(entry.rolled),
+        entry.rolled.rolls,
+      );
+      if (!written) {
+        throw new Error(`Player ${entry.playerId} is not on team ${teamId}.`);
+      }
+    }
+  });
+}
+
+export function replacePitcherValues(
+  leagueId: number,
+  teamId: number,
+  playerId: number,
+  pitcher: RolledPitcher,
+  database?: Database,
+): Promise<boolean> {
+  return replacePlayerValues(
+    "pitcher",
+    leagueId,
+    teamId,
+    playerId,
+    pitcherColumns(pitcher),
+    pitcher.rolls,
+    database,
+  );
+}
+
+export function replacePositionPlayerValues(
+  leagueId: number,
+  teamId: number,
+  playerId: number,
+  player: RolledPositionPlayer,
+  database?: Database,
+): Promise<boolean> {
+  return replacePlayerValues(
+    "position",
+    leagueId,
+    teamId,
+    playerId,
+    positionColumns(player),
+    player.rolls,
     database,
   );
 }

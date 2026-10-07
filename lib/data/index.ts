@@ -4,9 +4,14 @@ export {
   countPlayersByTeam,
   createPitchingStaff,
   createPositionPlayers,
+  getTeamPlayer,
   listTeamPitchers,
+  listTeamPlayerIds,
   listTeamPositionPlayers,
   listUsedNameIds,
+  replacePitcherValues,
+  replacePositionPlayerValues,
+  replaceTeamValues,
 } from "./players";
 export type {
   NewPitcher,
@@ -14,6 +19,8 @@ export type {
   Pitcher,
   PlayerRoll,
   PositionPlayer,
+  RerolledPlayer,
+  TeamPlayer,
   TeamPlayerCount,
 } from "./players";
 export { getTeam, listTeams, saveTeams } from "./teams";

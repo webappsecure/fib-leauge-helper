@@ -15,7 +15,13 @@ import { hrTendencyLabel } from "@/lib/rules/pitchers";
 import { GRADE_ATTRIBUTES } from "@/lib/rules/positions";
 import { rosterSize } from "@/lib/rules/roster";
 import { loadLeague } from "../../load-league";
-import { rollPitchingStaffAction, rollPositionPlayersAction } from "./actions";
+import {
+  rerollPlayerAction,
+  rerollTeamAction,
+  rollPitchingStaffAction,
+  rollPositionPlayersAction,
+} from "./actions";
+import { RerollButton } from "./reroll-button";
 import { RollButton } from "./roll-button";
 import { TeamDetails } from "./team-details";
 
@@ -24,6 +30,23 @@ type Params = Promise<{ leagueId: string; teamId: string }>;
 const cell = "h-7 border-b border-border px-2 text-left whitespace-nowrap";
 const heading = `${cell} bg-surface-2 text-xs font-semibold tracking-wide text-muted uppercase`;
 const centered = "text-center";
+
+function RerollCell({ player }: { player: Pitcher | PositionPlayer }) {
+  return (
+    <td className={`${cell} text-right`}>
+      <RerollButton
+        player={`${player.slot} ${player.name ?? "unnamed player"}`}
+        action={rerollPlayerAction.bind(null, player.leagueId, player.teamId, player.id)}
+      />
+    </td>
+  );
+}
+
+const rerollHeading = (
+  <th scope="col" className={heading}>
+    <span className="sr-only">Re-roll</span>
+  </th>
+);
 
 function PitcherRow({ pitcher }: { pitcher: Pitcher }) {
   return (
@@ -53,6 +76,7 @@ function PitcherRow({ pitcher }: { pitcher: Pitcher }) {
         {pitcher.stamina}
         <Dice rolls={pitcher.rolls} attributes={["stamina"]} />
       </td>
+      <RerollCell player={pitcher} />
     </tr>
   );
 }
@@ -93,6 +117,7 @@ function PitchingStaff({ pitchers }: { pitchers: Pitcher[] }) {
                 ST
               </abbr>
             </th>
+            {rerollHeading}
           </tr>
         </thead>
         <tbody>
@@ -102,7 +127,7 @@ function PitchingStaff({ pitchers }: { pitchers: Pitcher[] }) {
         </tbody>
         <tbody>
           <tr>
-            <th scope="rowgroup" colSpan={7} className={heading}>
+            <th scope="rowgroup" colSpan={8} className={heading}>
               Bullpen
             </th>
           </tr>
@@ -149,6 +174,7 @@ function Lineup({ players }: { players: PositionPlayer[] }) {
                 </abbr>
               </th>
             ))}
+            {rerollHeading}
           </tr>
         </thead>
         <tbody>
@@ -179,6 +205,7 @@ function Lineup({ players }: { players: PositionPlayer[] }) {
                   <Dice rolls={player.rolls} attributes={[attribute]} />
                 </td>
               ))}
+              <RerollCell player={player} />
             </tr>
           ))}
         </tbody>
@@ -217,9 +244,17 @@ async function TeamSheet({ params }: { params: Params }) {
           league.useDh ? "DH league" : "No DH"
         }`}
         actions={
-          <Link href={`/leagues/${league.id}/teams`} className={buttonClass.secondary}>
-            Team setup
-          </Link>
+          <>
+            {playerCount > 0 && (
+              <RollButton
+                label="Re-roll all players"
+                action={rerollTeamAction.bind(null, league.id, team.id)}
+              />
+            )}
+            <Link href={`/leagues/${league.id}/teams`} className={buttonClass.secondary}>
+              Team setup
+            </Link>
+          </>
         }
       />
       <TeamDetails team={team} />
