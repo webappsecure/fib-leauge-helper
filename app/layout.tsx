@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { DiceToggle } from "@/components/dice-toggle";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { applySavedDiceSetting } from "@/lib/preferences/dice";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -15,7 +17,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className="h-full antialiased" suppressHydrationWarning>
       <head>
-        <script dangerouslySetInnerHTML={{ __html: applySavedTheme }} />
+        <script dangerouslySetInnerHTML={{ __html: applySavedTheme + applySavedDiceSetting }} />
       </head>
       <body className="flex min-h-full flex-col font-sans text-base">
         <header className="flex items-center gap-4 bg-navy px-4 py-2 text-navy-ink">
@@ -30,6 +32,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
               Leagues
             </Link>
           </nav>
+          <DiceToggle />
           <ThemeToggle />
         </header>
         <main className="mx-auto w-full max-w-7xl flex-1 p-4">{children}</main>

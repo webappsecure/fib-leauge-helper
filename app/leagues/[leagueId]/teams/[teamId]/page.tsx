@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
+import { Dice } from "@/components/dice";
 import { GradeBadge } from "@/components/grade";
 import { Panel, PageTitle } from "@/components/ui";
 import {
@@ -8,7 +9,6 @@ import {
   listTeamPitchers,
   listTeamPositionPlayers,
   type Pitcher,
-  type PlayerRoll,
   type PositionPlayer,
 } from "@/lib/data";
 import { hrTendencyLabel } from "@/lib/rules/pitchers";
@@ -23,27 +23,6 @@ type Params = Promise<{ leagueId: string; teamId: string }>;
 const cell = "h-7 border-b border-border px-2 text-left whitespace-nowrap";
 const heading = `${cell} bg-surface-2 text-xs font-semibold tracking-wide text-muted uppercase`;
 const centered = "text-center";
-
-// The dice behind a rolled value, shown beside it. A value that took two
-// rolls, such as an archetype with an Elite check, shows both in order.
-function Dice({
-  rolls,
-  attributes,
-}: {
-  rolls: PlayerRoll[];
-  attributes: PlayerRoll["attribute"][];
-}) {
-  const dice = attributes.flatMap(
-    (attribute) => rolls.find((roll) => roll.attribute === attribute)?.dice ?? [],
-  );
-  if (dice.length === 0) return null;
-  return (
-    <span className="ml-1 font-mono text-xs text-faint">
-      <span className="sr-only">rolled </span>
-      {dice.join(", ")}
-    </span>
-  );
-}
 
 function PitcherRow({ pitcher }: { pitcher: Pitcher }) {
   return (

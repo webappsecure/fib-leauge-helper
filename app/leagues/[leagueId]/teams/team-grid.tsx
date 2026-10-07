@@ -41,7 +41,9 @@ const heading =
 const control =
   "h-6 w-full min-w-28 rounded-ui border border-border bg-surface px-1.5 text-text focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent aria-invalid:border-danger aria-invalid:bg-danger-bg";
 const smallButton = `${buttonClass.secondary} h-6 shrink-0 px-2 py-0`;
-const hint = "mt-0.5 block font-mono text-xs text-faint";
+// Says where a value came from. Hidden with the dice, typed and chosen
+// included, so a missing note cannot give away which values were rolled.
+const hint = "mt-0.5 block font-mono text-xs text-faint dice-hidden:hidden";
 
 function takenCities(teams: TeamInput[], exceptNumber?: number) {
   return teams

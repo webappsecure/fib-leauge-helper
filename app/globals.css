@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+/* Styles what should disappear while the header's dice button has dice
+   hidden. Hidden dice also leave the accessibility tree. */
+@custom-variant dice-hidden (&:where([data-dice="hidden"] *));
+
 /* Each token is light-dark(light, dark). The active side follows the system
    setting unless the theme toggle sets data-theme on <html>. */
 :root {
