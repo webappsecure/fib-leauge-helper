@@ -523,10 +523,11 @@ export function TeamGrid({
           </table>
         </div>
         <p className="border-t border-border px-3 py-2 text-xs text-muted">
-          A team is complete when it has a city and all three GM qualities. Type
-          a city or roll one from the weighted list (1 to 348); no city is used
-          twice. Random GM and manager names come from the name list and are
-          never shared with a player or another team. A bullet means
+          A team is complete when it has a city, a GM name, a manager name and
+          all three GM qualities. Every team needs a GM and a manager name
+          before the teams can be saved. Type a city or roll one from the
+          weighted list (1 to 348); no city is used twice. No two players, GMs
+          or managers in the league share a name. A bullet means
           &quot;semi&quot;, as in the handbook.
         </p>
       </Panel>

@@ -10,7 +10,13 @@ import { DEFAULT_BALLPARK_QUALITY } from "../rules/ballpark";
 import { NAME_LIST } from "../rules/name-list";
 import type { TeamInput } from "../teams/validate";
 import { generateLeague, generatePitchingStaff } from "./generate";
-import { checkStaffNames, drawStaffNames, usedNameIds } from "./name-pool";
+import {
+  checkStaffNames,
+  drawStaffNames,
+  findNameHolder,
+  listNameHolders,
+  usedNameIds,
+} from "./name-pool";
 
 let folder: string;
 let database: Database;
@@ -146,29 +152,119 @@ describe("drawStaffNames", () => {
   });
 });
 
-describe("checkStaffNames", () => {
-  it("passes distinct names and names that are not on the list", () => {
-    const teams = [
-      team(1, nameOf(1), nameOf(2)),
-      team(2, "Walt Harlow Made Up", "Walt Harlow Made Up"),
-      team(3, null, null),
-    ];
-    expect(checkStaffNames(teams, new Set([10, 11]))).toEqual({});
+describe("findNameHolder", () => {
+  const holders = [
+    { name: "Walt Harlow", label: "team 1's SP2", playerId: 7 },
+    { name: "Gordon Howland", label: "team 2's GM" },
+  ];
+
+  it("finds a holder whatever the capitals or spacing", () => {
+    expect(findNameHolder(holders, "  walt   HARLOW ")?.label).toBe("team 1's SP2");
+    expect(findNameHolder(holders, "gordon howland")?.label).toBe("team 2's GM");
   });
 
-  it("flags a name already held by a player", () => {
-    const errors = checkStaffNames([team(1, nameOf(10), nameOf(2))], new Set([10]));
+  it("finds nobody for a free name or a blank", () => {
+    expect(findNameHolder(holders, "Walt Harlowe")).toBeNull();
+    expect(findNameHolder(holders, "   ")).toBeNull();
+  });
+
+  it("leaves out the player being renamed, but nobody else", () => {
+    expect(findNameHolder(holders, "walt harlow", 7)).toBeNull();
+    expect(findNameHolder(holders, "walt harlow", 8)?.playerId).toBe(7);
+    expect(findNameHolder(holders, "Gordon Howland", 7)?.label).toBe("team 2's GM");
+  });
+});
+
+describe("listNameHolders", () => {
+  it("lists players by team number and slot, then GMs and managers", async () => {
+    const { league, teamIds } = await addLeague([
+      team(1, null, "Made Up Manager"),
+      team(2, nameOf(20), null),
+    ]);
+    await generatePitchingStaff(league.id, teamIds[1], first, database);
+
+    const holders = await listNameHolders(league.id, database);
+    expect(holders).toHaveLength(13);
+    expect(holders.slice(0, 11).every((holder) => holder.label.startsWith("team 2's "))).toBe(true);
+    expect(holders.find((holder) => holder.name === nameOf(1))).toMatchObject({
+      label: "team 2's SP1",
+      playerId: expect.any(Number),
+    });
+    expect(holders.slice(11)).toEqual([
+      { name: "Made Up Manager", label: "team 1's manager" },
+      { name: nameOf(20), label: "team 2's GM" },
+    ]);
+  });
+});
+
+describe("names typed by hand and the list", () => {
+  it("never draws a list name that someone typed in other capitals", async () => {
+    const { league, teamIds } = await addLeague([
+      team(1, nameOf(1).toUpperCase(), `  ${nameOf(2).toLowerCase()} `),
+      team(2, null, null),
+    ]);
+
+    expect([...(await usedNameIds(league.id, database))].sort()).toEqual([1, 2]);
+    await generatePitchingStaff(league.id, teamIds[0], first, database);
+    const pitchers = await listTeamPitchers(league.id, teamIds[0], database);
+    expect(pitchers[0].name).toBe(nameOf(3));
+
+    const drawn = await drawStaffNames(league.id, 1, [nameOf(14).toUpperCase()], first, database);
+    // Players hold 3 to 13 and the grid shows 14 in capitals.
+    expect(drawn).toEqual([nameOf(1)]);
+  });
+});
+
+describe("checkStaffNames", () => {
+  const player = (name: string, label: string) => ({ name, label, playerId: 1 });
+
+  it("passes distinct names and ignores blanks", () => {
+    const teams = [
+      team(1, nameOf(1), nameOf(2)),
+      team(2, "Walt Harlow Made Up", "Gordon Howland Made Up"),
+      team(3, null, "   "),
+    ];
+    expect(checkStaffNames(teams, [player(nameOf(10), "team 1's SP1")])).toEqual({});
+  });
+
+  it("flags a name held by a player and says which player", () => {
+    const errors = checkStaffNames(
+      [team(1, nameOf(10).toUpperCase(), nameOf(2))],
+      [player(nameOf(10), "team 3's SP2")],
+    );
     expect(errors).toEqual({
       1: {
-        gmName: `${nameOf(10)} is already a player in this league. Draw or type another name.`,
+        gmName: `${nameOf(10).toUpperCase()} is already team 3's SP2. Draw or type another name.`,
       },
     });
+  });
+
+  it("flags two typed names that are not on the list", () => {
+    const errors = checkStaffNames(
+      [team(1, "Walt Harlow Made Up", null), team(2, null, "walt  harlow made up")],
+      [],
+    );
+    expect(errors).toEqual({
+      2: {
+        managerName: "walt  harlow made up is already team 1's GM. Draw or type another name.",
+      },
+    });
+  });
+
+  it("flags a typed name a player holds even when it is not on the list", () => {
+    const errors = checkStaffNames(
+      [team(1, null, "Custom Catcher")],
+      [player("custom catcher", "team 2's C")],
+    );
+    expect(errors[1]?.managerName).toBe(
+      "Custom Catcher is already team 2's C. Draw or type another name.",
+    );
   });
 
   it("flags the later of two GMs with the same list name", () => {
     const errors = checkStaffNames(
       [team(2, nameOf(1), null), team(1, nameOf(1), null)],
-      new Set(),
+      [],
     );
     expect(errors).toEqual({
       2: { gmName: `${nameOf(1)} is already team 1's GM. Draw or type another name.` },
@@ -178,7 +274,7 @@ describe("checkStaffNames", () => {
   it("flags a manager who repeats a GM, on the same team or another", () => {
     const errors = checkStaffNames(
       [team(1, nameOf(1), nameOf(1)), team(2, null, nameOf(1)), team(3, nameOf(7), nameOf(7))],
-      new Set(),
+      [],
     );
     expect(errors).toEqual({
       1: { managerName: `${nameOf(1)} is already team 1's GM. Draw or type another name.` },
@@ -190,7 +286,7 @@ describe("checkStaffNames", () => {
   it("names the manager as the holder when a later GM repeats it", () => {
     const errors = checkStaffNames(
       [team(1, null, nameOf(4)), team(2, nameOf(4), null)],
-      new Set(),
+      [],
     );
     expect(errors[2]?.gmName).toBe(
       `${nameOf(4)} is already team 1's manager. Draw or type another name.`,

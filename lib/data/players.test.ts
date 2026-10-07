@@ -11,6 +11,9 @@ import {
   createPitchingStaff,
   createPositionPlayers,
   getTeamPlayer,
+  listLeaguePlayerNames,
+  renamePlayer,
+  renameTeamPlayers,
   listTeamPitchers,
   listTeamPositionPlayers,
   listUsedNameIds,
@@ -514,6 +517,143 @@ describe("re-rolling a player", () => {
         [
           { playerId: before[2].id, kind: "pitcher", rolled: rollPitcher("SP") },
           { playerId: otherTeamPitcher.id, kind: "pitcher", rolled: rollPitcher("SP") },
+        ],
+        database,
+      ),
+    ).rejects.toThrow();
+    expect(await listTeamPitchers(leagueId, teamIds[0], database)).toEqual(after);
+    expect((await listTeamPitchers(leagueId, teamIds[1], database))[0]).toEqual(
+      otherTeamPitcher,
+    );
+  });
+});
+
+describe("player names", () => {
+  beforeEach(async () => {
+    await createPitchingStaff(leagueId, teamIds[0], namedStaff(100), database);
+    await createPositionPlayers(leagueId, teamIds[0], namedLineup(200), database);
+    await createPitchingStaff(leagueId, teamIds[1], namedStaff(300), database);
+  });
+
+  it("lists every named player in the league with team and slot", async () => {
+    const other = await addLeague("Sun Belt League");
+    await createPitchingStaff(other.leagueId, other.teamIds[0], namedStaff(100), database);
+
+    const names = await listLeaguePlayerNames(leagueId, database);
+    expect(names).toHaveLength(31);
+    expect(names).toContainEqual({
+      id: expect.any(Number),
+      teamId: teamIds[0],
+      slot: "SP1",
+      name: "Pitcher 100",
+    });
+    expect(await listLeaguePlayerNames(other.leagueId, database)).toHaveLength(11);
+  });
+
+  it("leaves an unnamed player out of the list", async () => {
+    const [target] = await listTeamPitchers(leagueId, teamIds[0], database);
+    await database.$client.execute({
+      sql: "UPDATE players SET name = NULL, name_list_id = NULL WHERE id = ?",
+      args: [target.id],
+    });
+    const names = await listLeaguePlayerNames(leagueId, database);
+    expect(names).toHaveLength(30);
+    expect(names.some((entry) => entry.id === target.id)).toBe(false);
+  });
+
+  it("renames one player and changes nothing else about anyone", async () => {
+    const before = await listTeamPitchers(leagueId, teamIds[0], database);
+    const hitters = await listTeamPositionPlayers(leagueId, teamIds[0], database);
+    const target = before[3];
+    // A used breakthrough must survive a rename.
+    await database.$client.execute({
+      sql: "UPDATE players SET breakthrough_used = 1 WHERE id = ?",
+      args: [target.id],
+    });
+
+    expect(
+      await renamePlayer(
+        leagueId,
+        teamIds[0],
+        { playerId: target.id, name: "Walt Harlow", nameListId: 42 },
+        database,
+      ),
+    ).toBe(true);
+
+    const after = await listTeamPitchers(leagueId, teamIds[0], database);
+    expect(after[3]).toEqual({
+      ...target,
+      name: "Walt Harlow",
+      nameListId: 42,
+      breakthroughUsed: true,
+    });
+    expect(after.filter((pitcher) => pitcher.id !== target.id)).toEqual(
+      before.filter((pitcher) => pitcher.id !== target.id),
+    );
+    expect(await listTeamPositionPlayers(leagueId, teamIds[0], database)).toEqual(hitters);
+
+    await renamePlayer(
+      leagueId,
+      teamIds[0],
+      { playerId: target.id, name: "Typed By Hand", nameListId: null },
+      database,
+    );
+    const [typed] = (await listTeamPitchers(leagueId, teamIds[0], database)).filter(
+      (pitcher) => pitcher.id === target.id,
+    );
+    expect(typed).toMatchObject({ name: "Typed By Hand", nameListId: null });
+  });
+
+  it("renames a position player without touching its values or rolls", async () => {
+    const [target] = await listTeamPositionPlayers(leagueId, teamIds[0], database);
+    await renamePlayer(
+      leagueId,
+      teamIds[0],
+      { playerId: target.id, name: "New Catcher", nameListId: null },
+      database,
+    );
+    const [after] = await listTeamPositionPlayers(leagueId, teamIds[0], database);
+    expect(after).toEqual({ ...target, name: "New Catcher", nameListId: null });
+  });
+
+  it("writes nothing for a player on another team or in another league", async () => {
+    const pitchers = await listTeamPitchers(leagueId, teamIds[0], database);
+    const other = await addLeague("Sun Belt League");
+    const entry = { playerId: pitchers[0].id, name: "Nobody", nameListId: null };
+
+    expect(await renamePlayer(leagueId, teamIds[1], entry, database)).toBe(false);
+    expect(await renamePlayer(other.leagueId, teamIds[0], entry, database)).toBe(false);
+    expect(
+      await renamePlayer(leagueId, teamIds[0], { ...entry, playerId: 9999 }, database),
+    ).toBe(false);
+    expect(await listTeamPitchers(leagueId, teamIds[0], database)).toEqual(pitchers);
+  });
+
+  it("renames several players together, or none when one cannot be written", async () => {
+    const before = await listTeamPitchers(leagueId, teamIds[0], database);
+    const [otherTeamPitcher] = await listTeamPitchers(leagueId, teamIds[1], database);
+
+    await renameTeamPlayers(
+      leagueId,
+      teamIds[0],
+      [
+        { playerId: before[0].id, name: "First New", nameListId: 900 },
+        { playerId: before[1].id, name: "Second New", nameListId: null },
+      ],
+      database,
+    );
+    const after = await listTeamPitchers(leagueId, teamIds[0], database);
+    expect(after[0]).toEqual({ ...before[0], name: "First New", nameListId: 900 });
+    expect(after[1]).toEqual({ ...before[1], name: "Second New", nameListId: null });
+    expect(after.slice(2)).toEqual(before.slice(2));
+
+    await expect(
+      renameTeamPlayers(
+        leagueId,
+        teamIds[0],
+        [
+          { playerId: before[2].id, name: "Should Not Stick", nameListId: null },
+          { playerId: otherTeamPitcher.id, name: "Wrong Team", nameListId: null },
         ],
         database,
       ),

@@ -1,8 +1,12 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { getLeague, listUsedNameIds, saveTeams } from "@/lib/data";
-import { checkStaffNames, drawStaffNames } from "@/lib/rosters/name-pool";
+import { getLeague, saveTeams } from "@/lib/data";
+import {
+  checkStaffNames,
+  drawStaffNames,
+  listPlayerHolders,
+} from "@/lib/rosters/name-pool";
 import {
   TEAM_TEXT_MAX_LENGTH,
   TEAMS_PAGE_ERROR,
@@ -32,12 +36,9 @@ export async function saveTeamsAction(
   const result = validateTeams(rows, league.teamCount);
   if (!result.ok) return result;
 
-  // A GM or manager may not take a list name a player or another team's
-  // staff already holds.
-  const fields = checkStaffNames(
-    result.teams,
-    new Set(await listUsedNameIds(league.id)),
-  );
+  // A GM or manager may not take a name a player or another team's staff
+  // already holds.
+  const fields = checkStaffNames(result.teams, await listPlayerHolders(league.id));
   if (Object.keys(fields).length > 0) return { ok: false, errors: { fields } };
 
   await saveTeams(league.id, result.teams);

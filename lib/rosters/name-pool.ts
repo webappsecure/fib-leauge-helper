@@ -1,14 +1,13 @@
-import { listTeams, listUsedNameIds } from "../data";
+import { listLeaguePlayerNames, listTeams, listUsedNameIds } from "../data";
 import type { Database } from "../data/db";
 import type { RandomSource } from "../rules/dice";
-import { nameIdFor, pickName } from "../rules/names";
+import { nameIdFor, nameKey, pickName } from "../rules/names";
 import type { TeamFieldErrors, TeamInput } from "../teams/validate";
 
 // Server-side only: this pulls in the 5,000-name list.
 //
-// One pool of list names per league. A player holds the name it was given. A
-// GM or manager holds a list name when the saved text is exactly that name,
-// whether it was drawn or typed.
+// No two people in a league share a name: players, GMs and managers, typed
+// or drawn. Names are compared with `nameKey`. A blank name is nobody's.
 
 type Staffed = Pick<TeamInput, "number" | "gmName" | "managerName">;
 
@@ -16,6 +15,73 @@ const STAFF_FIELDS = [
   { field: "gmName", role: "GM" },
   { field: "managerName", role: "manager" },
 ] as const;
+
+// Someone who holds a name, and how to describe them in a message.
+export type NameHolder = { name: string; label: string; playerId?: number };
+
+// The league's named players, each described by team number and slot.
+export async function listPlayerHolders(
+  leagueId: number,
+  database?: Database,
+): Promise<NameHolder[]> {
+  const numbers = new Map(
+    (await listTeams(leagueId, database)).map((team) => [team.id, team.number]),
+  );
+  return (await listLeaguePlayerNames(leagueId, database)).map((player) => {
+    const number = player.teamId === null ? undefined : numbers.get(player.teamId);
+    return {
+      name: player.name,
+      playerId: player.id,
+      label:
+        number === undefined
+          ? "a player in this league"
+          : `team ${number}'s ${player.slot ?? "player"}`,
+    };
+  });
+}
+
+function staffHolders(teams: Staffed[]): NameHolder[] {
+  return [...teams]
+    .sort((a, b) => a.number - b.number)
+    .flatMap((team) =>
+      STAFF_FIELDS.flatMap(({ field, role }) => {
+        const name = team[field];
+        return name === null || nameKey(name) === ""
+          ? []
+          : [{ name, label: `team ${team.number}'s ${role}` }];
+      }),
+    );
+}
+
+// Everyone in the league who holds a name: players first, then each team's
+// GM and manager in team-number order.
+export async function listNameHolders(
+  leagueId: number,
+  database?: Database,
+): Promise<NameHolder[]> {
+  return [
+    ...(await listPlayerHolders(leagueId, database)),
+    ...staffHolders(await listTeams(leagueId, database)),
+  ];
+}
+
+// The first holder of this name, or null when it is free. A player being
+// renamed is left out so it does not clash with itself.
+export function findNameHolder(
+  holders: NameHolder[],
+  name: string,
+  exceptPlayerId?: number,
+): NameHolder | null {
+  const key = nameKey(name);
+  if (key === "") return null;
+  return (
+    holders.find(
+      (holder) =>
+        nameKey(holder.name) === key &&
+        (exceptPlayerId === undefined || holder.playerId !== exceptPlayerId),
+    ) ?? null
+  );
+}
 
 function listIds(names: Iterable<string | null>) {
   const ids: number[] = [];
@@ -26,15 +92,16 @@ function listIds(names: Iterable<string | null>) {
   return ids;
 }
 
-// Every list name in use in the league: players, saved GMs and saved managers.
+// Every list name someone in the league holds, typed or drawn, as list ids.
 export async function usedNameIds(
   leagueId: number,
   database?: Database,
 ): Promise<Set<number>> {
-  const teams = await listTeams(leagueId, database);
+  const holders = await listNameHolders(leagueId, database);
   return new Set([
+    // The stored ids too, so a draw can never trip the unique index.
     ...(await listUsedNameIds(leagueId, database)),
-    ...listIds(teams.flatMap((team) => [team.gmName, team.managerName])),
+    ...listIds(holders.map((holder) => holder.name)),
   ]);
 }
 
@@ -48,9 +115,10 @@ export async function drawStaffNames(
   random: RandomSource = Math.random,
   database?: Database,
 ): Promise<string[]> {
+  const players = await listPlayerHolders(leagueId, database);
   const used = new Set([
     ...(await listUsedNameIds(leagueId, database)),
-    ...listIds(gridNames),
+    ...listIds([...players.map((player) => player.name), ...gridNames]),
   ]);
   const names: string[] = [];
   for (let drawn = 0; drawn < count; drawn++) {
@@ -62,31 +130,28 @@ export async function drawStaffNames(
   return names;
 }
 
-// Finds GM and manager names that would repeat a list name in the league.
-// Teams are read in number order, GM before manager, and the later holder of
-// a name gets the error. Names that are not on the list are never flagged.
+// Finds GM and manager names that someone else in the league holds. Players
+// hold their names first; then teams are read in number order, GM before
+// manager, and the later holder of a name gets the error, which says who has
+// it. Blank names are left to the grid's own validation.
 export function checkStaffNames(
   teams: Staffed[],
-  playerNameIds: ReadonlySet<number>,
+  players: NameHolder[],
 ): TeamFieldErrors {
   const errors: TeamFieldErrors = {};
-  const holders = new Map<number, string>();
+  const holders = [...players];
 
   for (const team of [...teams].sort((a, b) => a.number - b.number)) {
     for (const { field, role } of STAFF_FIELDS) {
-      const name = team[field];
-      const id = nameIdFor(name);
-      if (name === null || id === null) continue;
+      const name = team[field]?.trim() ?? "";
+      if (nameKey(name) === "") continue;
 
-      const holder = holders.get(id);
-      if (playerNameIds.has(id)) {
+      const holder = findNameHolder(holders, name);
+      if (holder) {
         (errors[team.number] ??= {})[field] =
-          `${name.trim()} is already a player in this league. Draw or type another name.`;
-      } else if (holder) {
-        (errors[team.number] ??= {})[field] =
-          `${name.trim()} is already ${holder}. Draw or type another name.`;
+          `${name} is already ${holder.label}. Draw or type another name.`;
       } else {
-        holders.set(id, `team ${team.number}'s ${role}`);
+        holders.push({ name, label: `team ${team.number}'s ${role}` });
       }
     }
   }

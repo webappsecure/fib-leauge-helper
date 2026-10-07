@@ -6,9 +6,11 @@ import type { RollResult } from "./actions";
 
 export function RollButton({
   label,
+  pendingLabel = "Rolling",
   action,
 }: {
   label: string;
+  pendingLabel?: string;
   action: () => Promise<RollResult>;
 }) {
   const [rolling, startRolling] = useTransition();
@@ -30,7 +32,7 @@ export function RollButton({
         disabled={rolling}
         className={buttonClass.primary}
       >
-        {rolling ? "Rolling" : label}
+        {rolling ? pendingLabel : label}
       </button>
       {error && (
         <p role="alert" className="text-sm text-danger">

@@ -24,6 +24,10 @@ export const TEAM_TEXT_FIELDS = [
 
 export type TeamTextField = (typeof TEAM_TEXT_FIELDS)[number];
 
+// Nobody in a league goes unnamed, so a team cannot be saved without these.
+const REQUIRED_TEXT_FIELDS: readonly TeamTextField[] = ["gmName", "managerName"];
+export const NAME_REQUIRED = "Type a name, or press Random.";
+
 export type TeamInput = {
   number: number;
   city: string | null;
@@ -79,11 +83,18 @@ function wholeNumber(value: unknown, min: number, max: number) {
     : null;
 }
 
+// A blank GM or manager name can only be left over from before names were
+// required; such a team is not complete until it is filled in.
 export function isTeamComplete(
-  team: Pick<TeamInput, "city" | GmCategory>,
+  team: Pick<TeamInput, "city" | "gmName" | "managerName" | GmCategory>,
 ): boolean {
   return Boolean(
-    team.city && team.gmRisk && team.gmDevFocus && team.gmTeamBuilding,
+    team.city &&
+      team.gmName?.trim() &&
+      team.managerName?.trim() &&
+      team.gmRisk &&
+      team.gmDevFocus &&
+      team.gmTeamBuilding,
   );
 }
 
@@ -114,6 +125,8 @@ export function validateTeams(raw: unknown, teamCount: number): TeamsValidation 
           field === "city"
             ? `Keep the city to ${TEAM_TEXT_MAX_LENGTH} characters or fewer.`
             : `Keep this to ${TEAM_TEXT_MAX_LENGTH} characters or fewer.`;
+      } else if (trimmed === "" && REQUIRED_TEXT_FIELDS.includes(field)) {
+        (fields[number] ??= {})[field] = NAME_REQUIRED;
       }
     }
 

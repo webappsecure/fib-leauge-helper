@@ -15,11 +15,18 @@ export function pickName(
   return unused[rollDie(unused.length, random) - 1];
 }
 
-let idsByFullName: Map<string, number> | undefined;
+// The form two names are compared in: capitals, leading and trailing spaces
+// and extra spaces between words do not make a different name. Blank gives
+// an empty key. Every name comparison in the app goes through this.
+export function nameKey(name: string | null | undefined): string {
+  return (name ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+}
 
-// The list id of a full name, or null when the name is not on the list. The
-// match is exact apart from surrounding spaces.
-export function nameIdFor(fullName: string | null | undefined): number | null {
-  idsByFullName ??= new Map(NAME_LIST.map((entry) => [entry.fullName, entry.id]));
-  return idsByFullName.get((fullName ?? "").trim()) ?? null;
+let idsByKey: Map<string, number> | undefined;
+
+// The list id to store for a name, or null when the name is not on the list.
+// No name appears on the list twice, so a name has at most one id.
+export function nameIdFor(name: string | null | undefined): number | null {
+  idsByKey ??= new Map(NAME_LIST.map((entry) => [nameKey(entry.fullName), entry.id]));
+  return idsByKey.get(nameKey(name)) ?? null;
 }

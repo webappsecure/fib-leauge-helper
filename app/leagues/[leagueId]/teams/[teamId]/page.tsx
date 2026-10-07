@@ -16,11 +16,15 @@ import { GRADE_ATTRIBUTES } from "@/lib/rules/positions";
 import { rosterSize } from "@/lib/rules/roster";
 import { loadLeague } from "../../load-league";
 import {
+  randomPlayerNameAction,
+  renamePlayerAction,
+  renameTeamAction,
   rerollPlayerAction,
   rerollTeamAction,
   rollPitchingStaffAction,
   rollPositionPlayersAction,
 } from "./actions";
+import { PlayerName } from "./player-name";
 import { RerollButton } from "./reroll-button";
 import { RollButton } from "./roll-button";
 import { TeamDetails } from "./team-details";
@@ -30,6 +34,20 @@ type Params = Promise<{ leagueId: string; teamId: string }>;
 const cell = "h-7 border-b border-border px-2 text-left whitespace-nowrap";
 const heading = `${cell} bg-surface-2 text-xs font-semibold tracking-wide text-muted uppercase`;
 const centered = "text-center";
+
+function NameCell({ player }: { player: Pitcher | PositionPlayer }) {
+  const ids = [player.leagueId, player.teamId, player.id] as const;
+  return (
+    <td className={`${cell} font-semibold`}>
+      <PlayerName
+        slot={player.slot}
+        name={player.name}
+        rename={renamePlayerAction.bind(null, ...ids)}
+        random={randomPlayerNameAction.bind(null, ...ids)}
+      />
+    </td>
+  );
+}
 
 function RerollCell({ player }: { player: Pitcher | PositionPlayer }) {
   return (
@@ -54,9 +72,7 @@ function PitcherRow({ pitcher }: { pitcher: Pitcher }) {
       <th scope="row" className={`${cell} w-11 font-mono text-sm font-normal text-muted`}>
         {pitcher.slot}
       </th>
-      <td className={`${cell} font-semibold`}>
-        {pitcher.name ?? <span className="font-normal text-faint">Unnamed</span>}
-      </td>
+      <NameCell player={pitcher} />
       <td className={`${cell} ${centered} font-mono`}>
         {pitcher.age}
         <Dice rolls={pitcher.rolls} attributes={["age"]} />
@@ -186,11 +202,7 @@ function Lineup({ players }: { players: PositionPlayer[] }) {
               >
                 {player.slot}
               </th>
-              <td className={`${cell} font-semibold`}>
-                {player.name ?? (
-                  <span className="font-normal text-faint">Unnamed</span>
-                )}
-              </td>
+              <NameCell player={player} />
               <td className={`${cell} ${centered} font-mono`}>
                 {player.archetype}
                 <Dice rolls={player.rolls} attributes={["archetype", "eliteCheck"]} />
@@ -246,10 +258,17 @@ async function TeamSheet({ params }: { params: Params }) {
         actions={
           <>
             {playerCount > 0 && (
-              <RollButton
-                label="Re-roll all players"
-                action={rerollTeamAction.bind(null, league.id, team.id)}
-              />
+              <>
+                <RollButton
+                  label="Re-roll all players"
+                  action={rerollTeamAction.bind(null, league.id, team.id)}
+                />
+                <RollButton
+                  label="New names for all players"
+                  pendingLabel="Renaming"
+                  action={renameTeamAction.bind(null, league.id, team.id)}
+                />
+              </>
             )}
             <Link href={`/leagues/${league.id}/teams`} className={buttonClass.secondary}>
               Team setup

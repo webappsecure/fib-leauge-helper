@@ -1,21 +1,23 @@
 import { describe, expect, it } from "vitest";
 import {
+  NAME_REQUIRED,
   TEAMS_PAGE_ERROR,
   isTeamComplete,
   validateTeams,
   type TeamInput,
 } from "./validate";
 
+// A team with nothing filled in except the two names a save requires.
 function blank(number: number): TeamInput {
   return {
     number,
     city: null,
     name: null,
-    gmName: null,
+    gmName: `GM ${number}`,
     gmRisk: null,
     gmDevFocus: null,
     gmTeamBuilding: null,
-    managerName: null,
+    managerName: `Manager ${number}`,
     ballparkName: null,
     ballparkQuality: "neutral",
     cityRoll: null,
@@ -116,6 +118,33 @@ describe("validateTeams", () => {
     });
   });
 
+  it("refuses a blank or spaces-only GM or manager name on its field", () => {
+    expect(
+      fieldErrors(
+        [
+          { ...blank(1), gmName: null },
+          { ...blank(2), managerName: "   " },
+          { ...blank(3), gmName: "", managerName: undefined },
+        ],
+        3,
+      ),
+    ).toEqual({
+      fields: {
+        1: { gmName: NAME_REQUIRED },
+        2: { managerName: NAME_REQUIRED },
+        3: { gmName: NAME_REQUIRED, managerName: NAME_REQUIRED },
+      },
+    });
+  });
+
+  it("still allows a blank city, team name and ballpark name", () => {
+    const result = validateTeams(
+      [{ ...blank(1), city: "", name: null, ballparkName: "  " }],
+      1,
+    );
+    expect(result).toEqual({ ok: true, teams: [blank(1)] });
+  });
+
   it("reports a duplicate city on the later team, ignoring case and spaces", () => {
     expect(
       fieldErrors(
@@ -178,11 +207,16 @@ describe("validateTeams", () => {
 });
 
 describe("isTeamComplete", () => {
-  it("needs a city and all three GM qualities", () => {
+  it("needs a city, a GM name, a manager name and all three GM qualities", () => {
     expect(isTeamComplete(milwaukee)).toBe(true);
-    const withoutNames: TeamInput = { ...milwaukee, name: null, gmName: null };
-    expect(isTeamComplete(withoutNames)).toBe(true);
     expect(isTeamComplete({ ...milwaukee, city: null })).toBe(false);
     expect(isTeamComplete({ ...milwaukee, gmDevFocus: null })).toBe(false);
+    expect(isTeamComplete({ ...milwaukee, gmName: null })).toBe(false);
+    expect(isTeamComplete({ ...milwaukee, managerName: "   " })).toBe(false);
+  });
+
+  it("does not need a team name or a ballpark name", () => {
+    const bare: TeamInput = { ...milwaukee, name: null, ballparkName: null };
+    expect(isTeamComplete(bare)).toBe(true);
   });
 });

@@ -69,6 +69,7 @@ export type NewPitcher = StaffPitcher & Named;
 export type NewPositionPlayer = RolledPositionPlayer & Named;
 
 type PlayerKind = "pitcher" | "position";
+type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 
 // A team's players of one kind, each with the dice behind its values.
 async function listTeamPlayers(
@@ -329,6 +330,82 @@ export async function getTeamPlayer(
   return (row as TeamPlayer | undefined) ?? null;
 }
 
+export type NamedPlayer = {
+  id: number;
+  teamId: number | null;
+  slot: string | null;
+  name: string;
+};
+
+// Every player in the league who has a name, with where they play.
+export async function listLeaguePlayerNames(
+  leagueId: number,
+  database?: Database,
+): Promise<NamedPlayer[]> {
+  const db = database ?? (await getDatabase());
+  const rows = await db
+    .select({
+      id: players.id,
+      teamId: players.teamId,
+      slot: players.slot,
+      name: players.name,
+    })
+    .from(players)
+    .where(and(eq(players.leagueId, leagueId), isNotNull(players.name)));
+  return rows.flatMap((row) => (row.name === null ? [] : [{ ...row, name: row.name }]));
+}
+
+export type PlayerName = { playerId: number; name: string; nameListId: number | null };
+
+// Sets a player's name and nothing else. Returns false, writing nothing,
+// when the player is not on that team.
+async function writePlayerName(
+  tx: Transaction,
+  leagueId: number,
+  teamId: number,
+  { playerId, name, nameListId }: PlayerName,
+): Promise<boolean> {
+  const updated = await tx
+    .update(players)
+    .set({ name, nameListId })
+    .where(
+      and(
+        eq(players.id, playerId),
+        eq(players.leagueId, leagueId),
+        eq(players.teamId, teamId),
+      ),
+    )
+    .returning({ id: players.id });
+  return updated.length > 0;
+}
+
+export async function renamePlayer(
+  leagueId: number,
+  teamId: number,
+  entry: PlayerName,
+  database?: Database,
+): Promise<boolean> {
+  const db = database ?? (await getDatabase());
+  return db.transaction((tx) => writePlayerName(tx, leagueId, teamId, entry));
+}
+
+// Renames several players on one team, all or nothing.
+export async function renameTeamPlayers(
+  leagueId: number,
+  teamId: number,
+  entries: PlayerName[],
+  database?: Database,
+): Promise<void> {
+  const db = database ?? (await getDatabase());
+  await db.transaction(async (tx) => {
+    for (const entry of entries) {
+      if (!(await writePlayerName(tx, leagueId, teamId, entry))) {
+        throw new Error(`Player ${entry.playerId} is not on team ${teamId}.`);
+      }
+    }
+  });
+}
+
 // Every player on a team, pitchers and position players alike.
 export async function listTeamPlayerIds(
   leagueId: number,
@@ -347,7 +424,6 @@ export async function listTeamPlayerIds(
   return rows as TeamPlayer[];
 }
 
-type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 type RolledColumns =
   | ReturnType<typeof pitcherColumns>
   | ReturnType<typeof positionColumns>;

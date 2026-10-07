@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { NAME_LIST } from "./name-list";
-import { nameIdFor, pickName } from "./names";
+import { nameIdFor, nameKey, pickName } from "./names";
 
 describe("name list", () => {
   it("has 5,000 entries with ids 1 to 5,000 and no gaps", () => {
@@ -8,8 +8,9 @@ describe("name list", () => {
     expect(NAME_LIST.every((entry, index) => entry.id === index + 1)).toBe(true);
   });
 
-  it("never repeats a full name", () => {
-    expect(new Set(NAME_LIST.map((entry) => entry.fullName)).size).toBe(5000);
+  // The name rules rely on this: a name has at most one list id.
+  it("never repeats a full name, even in other capitals or spacing", () => {
+    expect(new Set(NAME_LIST.map((entry) => nameKey(entry.fullName))).size).toBe(5000);
   });
 
   it("keeps every part of each row", () => {
@@ -67,11 +68,31 @@ describe("nameIdFor", () => {
     expect(nameIdFor("  Andrew Martinelli ")).toBe(1);
   });
 
-  it("returns null for a different case, a partial name or nothing", () => {
-    expect(nameIdFor("andrew martinelli")).toBeNull();
+  it("ignores capitals and extra spaces between words", () => {
+    expect(nameIdFor("andrew martinelli")).toBe(1);
+    expect(nameIdFor("ANDREW   Martinelli")).toBe(1);
+  });
+
+  it("returns null for a partial name, an unlisted name or nothing", () => {
     expect(nameIdFor("Andrew")).toBeNull();
     expect(nameIdFor("Gordon Howland Made Up")).toBeNull();
     expect(nameIdFor("")).toBeNull();
     expect(nameIdFor(null)).toBeNull();
+  });
+});
+
+describe("nameKey", () => {
+  it("treats capitals, outer spaces and runs of inner spaces as the same name", () => {
+    expect(nameKey("  John   SMITH ")).toBe("john smith");
+    expect(nameKey("john smith")).toBe(nameKey("John Smith"));
+    expect(nameKey("John\tSmith")).toBe("john smith");
+  });
+
+  it("keeps different names apart and gives an empty key for a blank", () => {
+    expect(nameKey("John Smith")).not.toBe(nameKey("John Smyth"));
+    expect(nameKey("JohnSmith")).not.toBe(nameKey("John Smith"));
+    expect(nameKey("   ")).toBe("");
+    expect(nameKey(null)).toBe("");
+    expect(nameKey(undefined)).toBe("");
   });
 });
