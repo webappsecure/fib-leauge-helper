@@ -2,7 +2,15 @@ import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { PITCHER_SLOTS, rollPitcher, rollPitchingStaff } from "../rules/pitchers";
+import { GRADES, type Grade } from "../rules/grades";
+import {
+  orderStarters,
+  PITCHER_SLOTS,
+  rollPitcher,
+  rollPitchingStaff,
+  STARTER_SLOTS,
+  type RolledPitcher,
+} from "../rules/pitchers";
 import { rollLineup, rollPositionPlayer } from "../rules/positions";
 import { openDatabase, type Database } from "./db";
 import { createLeague } from "./leagues";
@@ -23,6 +31,7 @@ import {
   replaceTeamValues,
   listTeamPlayerIds,
   type NewPitcher,
+  type Pitcher,
   type NewPositionPlayer,
 } from "./players";
 import { getTeam, listTeams, saveTeams } from "./teams";
@@ -318,6 +327,33 @@ describe("re-rolling a player", () => {
   const asSaved = (rolls: { attribute: string }[]) =>
     expect.arrayContaining(rolls.map((roll) => ({ ...roll, source: "app" })));
 
+  const isStarter = (pitcher: Pitcher) => pitcher.naturalPosition === "SP";
+  // Everything about each pitcher except where they sit, keyed by id, so a
+  // change of slot alone does not count as a change to the pitcher.
+  const apartFromSlot = (pitchers: Pitcher[]) =>
+    Object.fromEntries(
+      pitchers.map((pitcher) => [pitcher.id, { ...pitcher, slot: "any" }]),
+    );
+
+  // The six starters fill SP1 to SP6 in the order the rules put them in.
+  function expectStartersBestFirst(pitchers: Pitcher[]) {
+    const starters = pitchers.filter(isStarter);
+    expect(starters.map((starter) => starter.slot)).toEqual([...STARTER_SLOTS]);
+    expect(orderStarters(starters).map((starter) => starter.id)).toEqual(
+      starters.map((starter) => starter.id),
+    );
+    const grades = starters.map((starter) => GRADES.indexOf(starter.grade));
+    expect(grades).toEqual([...grades].sort((a, b) => b - a));
+  }
+
+  const starter = (grade: Grade): RolledPitcher => ({
+    ...rollPitcher("SP"),
+    grade,
+    gradeCeiling: grade,
+    hrTendency: "neutral",
+    stamina: 6,
+  });
+
   // Keeps rolling until the catcher does or does not need an Elite check.
   function catcher(withEliteCheck: boolean) {
     for (let attempt = 0; attempt < 10000; attempt += 1) {
@@ -366,10 +402,10 @@ describe("re-rolling a player", () => {
     ).toBe(true);
 
     const after = await listTeamPitchers(leagueId, teamIds[0], database);
-    expect(after[2]).toMatchObject({
+    const saved = after.find((pitcher) => pitcher.id === target.id)!;
+    expect(saved).toMatchObject({
       id: target.id,
       teamId: teamIds[0],
-      slot: target.slot,
       naturalPosition: target.naturalPosition,
       name: target.name,
       nameListId: target.nameListId,
@@ -380,12 +416,17 @@ describe("re-rolling a player", () => {
       hrTendency: rolled.hrTendency,
       stamina: rolled.stamina,
     });
-    expect(after[2].rolls).toHaveLength(4);
-    expect(after[2].rolls).toEqual(asSaved(rolled.rolls));
+    expect(saved.rolls).toHaveLength(4);
+    expect(saved.rolls).toEqual(asSaved(rolled.rolls));
 
-    expect(after.filter((pitcher) => pitcher.id !== target.id)).toEqual(
-      before.filter((pitcher) => pitcher.id !== target.id),
+    // The other pitchers keep everything; starters may only change slot.
+    const others = (pitchers: Pitcher[]) =>
+      pitchers.filter((pitcher) => pitcher.id !== target.id);
+    expect(apartFromSlot(others(after))).toEqual(apartFromSlot(others(before)));
+    expect(after.filter((pitcher) => !isStarter(pitcher))).toEqual(
+      before.filter((pitcher) => !isStarter(pitcher)),
     );
+    expectStartersBestFirst(after);
     expect(await listTeamPitchers(leagueId, teamIds[1], database)).toEqual(otherTeam);
     expect(await listTeamPositionPlayers(leagueId, teamIds[0], database)).toEqual(hitters);
   });
@@ -507,9 +548,13 @@ describe("re-rolling a player", () => {
       database,
     );
     const after = await listTeamPitchers(leagueId, teamIds[0], database);
-    expect(after[0].rolls).toEqual(asSaved(first.rolls));
-    expect(after[1].rolls).toEqual(asSaved(second.rolls));
-    expect(after.slice(2)).toEqual(before.slice(2));
+    const byId = (id: number) => after.find((pitcher) => pitcher.id === id)!;
+    expect(byId(before[0].id).rolls).toEqual(asSaved(first.rolls));
+    expect(byId(before[1].id).rolls).toEqual(asSaved(second.rolls));
+    const untouched = (pitchers: Pitcher[]) =>
+      pitchers.filter((pitcher) => ![before[0].id, before[1].id].includes(pitcher.id));
+    expect(apartFromSlot(untouched(after))).toEqual(apartFromSlot(untouched(before)));
+    expectStartersBestFirst(after);
 
     await expect(
       replaceTeamValues(
@@ -526,6 +571,115 @@ describe("re-rolling a player", () => {
     expect((await listTeamPitchers(leagueId, teamIds[1], database))[0]).toEqual(
       otherTeamPitcher,
     );
+  });
+
+  it("puts the starters back in order, best first, moving only their slots", async () => {
+    const before = await listTeamPitchers(leagueId, teamIds[0], database);
+    const hitters = await listTeamPositionPlayers(leagueId, teamIds[0], database);
+    const otherTeam = await listTeamPitchers(leagueId, teamIds[1], database);
+    const starters = before.filter(isStarter);
+    // Worst to best in slot order, so the save has to turn the six round.
+    const grades: Grade[] = ["F", "D", "C", "B", "B+", "A"];
+
+    await replaceTeamValues(
+      leagueId,
+      teamIds[0],
+      starters.map((pitcher, index) => ({
+        playerId: pitcher.id,
+        kind: "pitcher" as const,
+        rolled: starter(grades[index]),
+      })),
+      database,
+    );
+
+    const after = await listTeamPitchers(leagueId, teamIds[0], database);
+    const newStarters = after.filter(isStarter);
+    expect(newStarters.map((pitcher) => pitcher.slot)).toEqual([...STARTER_SLOTS]);
+    expect(newStarters.map((pitcher) => pitcher.grade)).toEqual([...grades].reverse());
+    expect(newStarters.map((pitcher) => pitcher.id)).toEqual(
+      [...starters].reverse().map((pitcher) => pitcher.id),
+    );
+    // Names stay with their pitcher; relievers, closer and everyone else stay put.
+    expect(newStarters.map((pitcher) => pitcher.name)).toEqual(
+      [...starters].reverse().map((pitcher) => pitcher.name),
+    );
+    expect(after.filter((pitcher) => !isStarter(pitcher))).toEqual(
+      before.filter((pitcher) => !isStarter(pitcher)),
+    );
+    expect(await listTeamPositionPlayers(leagueId, teamIds[0], database)).toEqual(hitters);
+    expect(await listTeamPitchers(leagueId, teamIds[1], database)).toEqual(otherTeam);
+  });
+
+  it("moves one re-rolled starter to its place and shifts the rest", async () => {
+    const before = (await listTeamPitchers(leagueId, teamIds[0], database)).filter(isStarter);
+    const grades: Grade[] = ["A", "B+", "B", "C", "D", "F"];
+    await replaceTeamValues(
+      leagueId,
+      teamIds[0],
+      before.map((pitcher, index) => ({
+        playerId: pitcher.id,
+        kind: "pitcher" as const,
+        rolled: starter(grades[index]),
+      })),
+      database,
+    );
+    const ids = before.map((pitcher) => pitcher.id);
+
+    // The worst starter becomes the best: SP6 goes to SP1 and the others drop one.
+    await replacePitcherValues(leagueId, teamIds[0], ids[5], starter("A+"), database);
+    let starters = (await listTeamPitchers(leagueId, teamIds[0], database)).filter(isStarter);
+    expect(starters.map((pitcher) => pitcher.id)).toEqual([ids[5], ...ids.slice(0, 5)]);
+    expect(starters.map((pitcher) => pitcher.slot)).toEqual([...STARTER_SLOTS]);
+
+    // An equal grade does not jump the queue: the re-rolled B stays behind the B already there.
+    await replacePitcherValues(leagueId, teamIds[0], ids[0], starter("B"), database);
+    starters = (await listTeamPitchers(leagueId, teamIds[0], database)).filter(isStarter);
+    expect(starters.map((pitcher) => pitcher.id)).toEqual([
+      ids[5], ids[1], ids[0], ids[2], ids[3], ids[4],
+    ]);
+  });
+
+  it("moves nobody when a reliever or the closer is re-rolled", async () => {
+    const grades: Grade[] = ["A", "B+", "B", "C", "D", "F"];
+    const starters = (await listTeamPitchers(leagueId, teamIds[0], database)).filter(isStarter);
+    await replaceTeamValues(
+      leagueId,
+      teamIds[0],
+      starters.map((pitcher, index) => ({
+        playerId: pitcher.id,
+        kind: "pitcher" as const,
+        rolled: starter(grades[index]),
+      })),
+      database,
+    );
+    const before = await listTeamPitchers(leagueId, teamIds[0], database);
+    const closer = before.find((pitcher) => pitcher.slot === "CL")!;
+
+    await replacePitcherValues(
+      leagueId,
+      teamIds[0],
+      closer.id,
+      { ...rollPitcher("CL"), grade: "A+", gradeCeiling: "A+" },
+      database,
+    );
+
+    const after = await listTeamPitchers(leagueId, teamIds[0], database);
+    expect(after.map((pitcher) => [pitcher.id, pitcher.slot])).toEqual(
+      before.map((pitcher) => [pitcher.id, pitcher.slot]),
+    );
+  });
+
+  it("keeps the old order when the save fails", async () => {
+    const before = await listTeamPitchers(leagueId, teamIds[0], database);
+    const worst = before.filter(isStarter)[5];
+    const best = starter("A+");
+    const broken = { ...best, rolls: [...best.rolls, best.rolls[0]] };
+
+    await expect(
+      replacePitcherValues(leagueId, teamIds[0], worst.id, broken, database),
+    ).rejects.toThrow();
+
+    expect(await listTeamPitchers(leagueId, teamIds[0], database)).toEqual(before);
   });
 });
 

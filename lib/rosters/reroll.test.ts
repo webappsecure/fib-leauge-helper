@@ -112,8 +112,10 @@ describe("rerollPlayer", () => {
       const after = (await listTeamPitchers(leagueId, teamIds[0], database)).find(
         (pitcher) => pitcher.id === target.id,
       )!;
+      // A re-rolled starter can move within SP1 to SP6; nobody else moves.
+      if (role !== "SP") expect(after.slot).toBe(slot);
       expect(after).toMatchObject({
-        slot,
+        naturalPosition: role,
         name: target.name,
         nameListId: target.nameListId,
         age: expected.age,
@@ -209,10 +211,15 @@ describe("rerollPlayer", () => {
   it("gives a different player each time it is pressed", async () => {
     const [target] = await listTeamPitchers(leagueId, teamIds[0], database);
 
+    const saved = async () =>
+      (await listTeamPitchers(leagueId, teamIds[0], database)).find(
+        (pitcher) => pitcher.id === target.id,
+      )!;
+
     await rerollPlayer(leagueId, teamIds[0], target.id, dice(11, 11, 11, 11), database);
-    const [first] = await listTeamPitchers(leagueId, teamIds[0], database);
+    const first = await saved();
     await rerollPlayer(leagueId, teamIds[0], target.id, dice(66, 66, 66, 66), database);
-    const [second] = await listTeamPitchers(leagueId, teamIds[0], database);
+    const second = await saved();
 
     expect(first.rolls.map((roll) => roll.dice)).toEqual(["11", "11", "11", "11"]);
     expect(second.rolls.map((roll) => roll.dice)).toEqual(["66", "66", "66", "66"]);
@@ -237,7 +244,8 @@ describe("rerollTeam", () => {
   it("re-rolls all 20 players and keeps every name and slot", async () => {
     const pitchers = await listTeamPitchers(leagueId, teamIds[0], database);
     const hitters = await listTeamPositionPlayers(leagueId, teamIds[0], database);
-    // Every die comes up 1, so every roll is 11.
+    // Every die comes up 1, so every roll is 11 and the six starters come out
+    // equal, which leaves them in the order they were in.
     const ones = () => 0;
 
     expect(await rerollTeam(leagueId, teamIds[0], ones, database)).toBe(20);
@@ -291,5 +299,42 @@ describe("rerollTeam", () => {
     };
     expect(await rerollTeam(leagueId, teamIds[1], never, database)).toBe(0);
     expect(await rerollTeam(leagueId + 1, teamIds[0], never, database)).toBe(0);
+  });
+});
+
+describe("starters after a re-roll", () => {
+  const starters = async () =>
+    (await listTeamPitchers(leagueId, teamIds[0], database)).filter(
+      (pitcher) => pitcher.naturalPosition === "SP",
+    );
+
+  it("keeps SP1 to SP6 best to worst after a team re-roll and after single re-rolls", async () => {
+    const gradeOrder = ["F", "D", "C", "B", "B+", "A", "A+"];
+    const expectBestFirst = async () => {
+      const staff = await starters();
+      expect(staff.map((pitcher) => pitcher.slot)).toEqual(["SP1", "SP2", "SP3", "SP4", "SP5", "SP6"]);
+      const values = staff.map((pitcher) => gradeOrder.indexOf(pitcher.grade));
+      expect(values).toEqual([...values].sort((a, b) => b - a));
+    };
+
+    for (let round = 0; round < 5; round += 1) {
+      await rerollTeam(leagueId, teamIds[0], Math.random, database);
+      await expectBestFirst();
+      for (const pitcher of await starters()) {
+        await rerollPlayer(leagueId, teamIds[0], pitcher.id, Math.random, database);
+        await expectBestFirst();
+      }
+    }
+  });
+
+  it("keeps each starter's name with them when the order changes", async () => {
+    const before = await starters();
+    const names = new Map(before.map((pitcher) => [pitcher.id, pitcher.name]));
+
+    await rerollTeam(leagueId, teamIds[0], Math.random, database);
+
+    for (const pitcher of await starters()) {
+      expect(pitcher.name).toBe(names.get(pitcher.id));
+    }
   });
 });

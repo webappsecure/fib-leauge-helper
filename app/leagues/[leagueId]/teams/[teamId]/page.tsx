@@ -11,7 +11,13 @@ import {
   type Pitcher,
   type PositionPlayer,
 } from "@/lib/data";
-import { hrTendencyLabel } from "@/lib/rules/pitchers";
+import {
+  finderNote,
+  positionFinders,
+  SP_FINDER_RANGES,
+  type PositionFinders,
+} from "@/lib/rules/finders";
+import { hrTendencyLabel, orderStarters, STARTER_SLOTS } from "@/lib/rules/pitchers";
 import { GRADE_ATTRIBUTES } from "@/lib/rules/positions";
 import { bullpenQualities, teamQualities } from "@/lib/rules/qualities";
 import { rosterSize } from "@/lib/rules/roster";
@@ -62,6 +68,16 @@ function RerollCell({ player }: { player: Pitcher | PositionPlayer }) {
   );
 }
 
+// A finder range, or a dash when the row has none. Ranges are values, not
+// the dice behind a value, so they stay when dice are hidden.
+function FinderCell({ range }: { range: string | null | undefined }) {
+  return (
+    <td className={`${cell} ${centered} font-mono`}>
+      {range ?? <span className="text-faint">-</span>}
+    </td>
+  );
+}
+
 const rerollHeading = (
   <th scope="col" className={heading}>
     <span className="sr-only">Re-roll</span>
@@ -94,13 +110,19 @@ function PitcherRow({ pitcher }: { pitcher: Pitcher }) {
         {pitcher.stamina}
         <Dice rolls={pitcher.rolls} attributes={["stamina"]} />
       </td>
+      <FinderCell range={SP_FINDER_RANGES[pitcher.slot]} />
       <RerollCell player={pitcher} />
     </tr>
   );
 }
 
 function PitchingStaff({ pitchers }: { pitchers: Pitcher[] }) {
-  const starters = pitchers.filter((pitcher) => pitcher.naturalPosition === "SP");
+  // Starters are shown best first, each in the slot that rank gives them. A
+  // team rolled before starters were kept in order is sorted here for
+  // display; its saved slots catch up the next time a starter changes.
+  const starters = orderStarters(
+    pitchers.filter((pitcher) => pitcher.naturalPosition === "SP"),
+  ).map((pitcher, index) => ({ ...pitcher, slot: STARTER_SLOTS[index] ?? pitcher.slot }));
   const bullpen = pitchers.filter((pitcher) => pitcher.naturalPosition !== "SP");
 
   return (
@@ -135,6 +157,11 @@ function PitchingStaff({ pitchers }: { pitchers: Pitcher[] }) {
                 ST
               </abbr>
             </th>
+            <th scope="col" className={`${heading} ${centered}`}>
+              <abbr title="Starting pitcher finder" className="no-underline">
+                Finder
+              </abbr>
+            </th>
             {rerollHeading}
           </tr>
         </thead>
@@ -145,7 +172,7 @@ function PitchingStaff({ pitchers }: { pitchers: Pitcher[] }) {
         </tbody>
         <tbody>
           <tr>
-            <th scope="rowgroup" colSpan={8} className={heading}>
+            <th scope="rowgroup" colSpan={9} className={heading}>
               Bullpen
             </th>
           </tr>
@@ -165,7 +192,26 @@ const shortHeadings = [
   { label: "CL", title: "Clutch" },
 ];
 
-function Lineup({ players }: { players: PositionPlayer[] }) {
+function Lineup({
+  players,
+  finders,
+}: {
+  players: PositionPlayer[];
+  finders: PositionFinders;
+}) {
+  const rangeFor = (finder: "clutch" | "homeRun", slot: string) =>
+    finders.available
+      ? finders[finder].rows.find((row) => row.slot === slot)?.range
+      : null;
+  const other = finders.available
+    ? finders.homeRun.rows.find((row) => row.slot === "Other")
+    : undefined;
+  const notes = finders.available
+    ? [finderNote("Clutch", finders.clutch), finderNote("HR", finders.homeRun)].filter(
+        (note) => note !== null,
+      )
+    : [];
+
   return (
     <div className="overflow-x-auto">
       <table className="w-full border-collapse">
@@ -192,6 +238,16 @@ function Lineup({ players }: { players: PositionPlayer[] }) {
                 </abbr>
               </th>
             ))}
+            <th scope="col" className={`${heading} ${centered}`}>
+              <abbr title="Clutch hit finder" className="no-underline">
+                Hit finder
+              </abbr>
+            </th>
+            <th scope="col" className={`${heading} ${centered}`}>
+              <abbr title="Home run finder" className="no-underline">
+                HR finder
+              </abbr>
+            </th>
             {rerollHeading}
           </tr>
         </thead>
@@ -219,11 +275,34 @@ function Lineup({ players }: { players: PositionPlayer[] }) {
                   <Dice rolls={player.rolls} attributes={[attribute]} />
                 </td>
               ))}
+              <FinderCell range={rangeFor("clutch", player.slot)} />
+              <FinderCell range={rangeFor("homeRun", player.slot)} />
               <RerollCell player={player} />
             </tr>
           ))}
+          {other && (
+            <tr className="hover:bg-surface-2">
+              <th
+                scope="row"
+                className={`${cell} font-mono text-sm font-normal text-muted`}
+              >
+                Other
+              </th>
+              <td colSpan={7} className={`${cell} text-faint`}>
+                Non-starters
+              </td>
+              <FinderCell range={null} />
+              <FinderCell range={other.range} />
+              <td className={cell} />
+            </tr>
+          )}
         </tbody>
       </table>
+      {notes.length > 0 && (
+        <p className="border-t border-border px-3 py-2 text-xs text-muted">
+          {notes.join(" ")}
+        </p>
+      )}
     </div>
   );
 }
@@ -312,7 +391,10 @@ async function TeamSheet({ params }: { params: Params }) {
             />
           </div>
         ) : (
-          <Lineup players={positionPlayers} />
+          <Lineup
+            players={positionPlayers}
+            finders={positionFinders(positionPlayers, league.useDh)}
+          />
         )}
       </Panel>
     </>

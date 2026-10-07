@@ -1,7 +1,9 @@
 import { and, count, eq, inArray, isNotNull } from "drizzle-orm";
 import type { Grade } from "../rules/grades";
 import {
+  orderStarters,
   PITCHER_SLOTS,
+  STARTER_SLOTS,
   type HrTendency,
   type PitcherAttribute,
   type PitcherRole,
@@ -499,7 +501,52 @@ async function writePlayerValues(
   return true;
 }
 
-// One player, all or nothing.
+// Puts a team's starting pitchers back in order, best first, by rewriting
+// their slots. Starters keep everything else. The slots are cleared before
+// they are set so no two starters hold one slot at any moment.
+async function reorderStarters(tx: Transaction, leagueId: number, teamId: number) {
+  const rows = await tx
+    .select({
+      id: players.id,
+      slot: players.slot,
+      grade: players.grade,
+      hrTendency: players.hrTendency,
+      stamina: players.stamina,
+    })
+    .from(players)
+    .where(
+      and(
+        eq(players.leagueId, leagueId),
+        eq(players.teamId, teamId),
+        inArray(players.slot, [...STARTER_SLOTS]),
+      ),
+    );
+  // Start from the present order, so equal starters stay where they are.
+  const current = rows.sort(
+    (a, b) =>
+      STARTER_SLOTS.indexOf(a.slot as PitcherSlot) -
+      STARTER_SLOTS.indexOf(b.slot as PitcherSlot),
+  ) as { id: number; slot: PitcherSlot; grade: Grade; hrTendency: HrTendency; stamina: number | null }[];
+  const ordered = orderStarters(current);
+  if (ordered.every((starter, index) => starter.id === current[index].id)) return;
+
+  const slots = current.map((starter) => starter.slot);
+  await tx
+    .update(players)
+    .set({ slot: null })
+    .where(
+      inArray(
+        players.id,
+        current.map((starter) => starter.id),
+      ),
+    );
+  for (const [index, starter] of ordered.entries()) {
+    await tx.update(players).set({ slot: slots[index] }).where(eq(players.id, starter.id));
+  }
+}
+
+// One player, all or nothing. A changed pitcher can change which starter is
+// best, so the starters are put back in order in the same save.
 async function replacePlayerValues(
   kind: PlayerKind,
   leagueId: number,
@@ -510,9 +557,19 @@ async function replacePlayerValues(
   database?: Database,
 ): Promise<boolean> {
   const db = database ?? (await getDatabase());
-  return db.transaction((tx) =>
-    writePlayerValues(tx, kind, leagueId, teamId, playerId, columns, newRolls),
-  );
+  return db.transaction(async (tx) => {
+    const written = await writePlayerValues(
+      tx,
+      kind,
+      leagueId,
+      teamId,
+      playerId,
+      columns,
+      newRolls,
+    );
+    if (written && kind === "pitcher") await reorderStarters(tx, leagueId, teamId);
+    return written;
+  });
 }
 
 export type RerolledPlayer =
@@ -544,6 +601,9 @@ export async function replaceTeamValues(
       if (!written) {
         throw new Error(`Player ${entry.playerId} is not on team ${teamId}.`);
       }
+    }
+    if (entries.some((entry) => entry.kind === "pitcher")) {
+      await reorderStarters(tx, leagueId, teamId);
     }
   });
 }

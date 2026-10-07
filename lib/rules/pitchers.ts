@@ -1,6 +1,6 @@
 import { NEW_TEAM_AGE_TABLE } from "./age";
 import { lookupD66, rollD66, type D66Row, type RandomSource } from "./dice";
-import { nextGrade, type Grade } from "./grades";
+import { gradeValue, nextGrade, type Grade } from "./grades";
 
 export type PitcherRole = "SP" | "RP" | "CL";
 
@@ -147,11 +147,38 @@ export function rollPitcher(
 
 export type StaffPitcher = RolledPitcher & { slot: PitcherSlot };
 
+export const STARTER_SLOTS: readonly PitcherSlot[] = PITCHER_SLOTS.filter(
+  (slot) => roleForSlot(slot) === "SP",
+);
+
+type StarterValues = Pick<RolledPitcher, "grade" | "hrTendency" | "stamina">;
+
+const tendencyRank = (tendency: HrTendency) =>
+  HR_TENDENCIES.findIndex((entry) => entry.value === tendency);
+
+// Puts starters best first: the higher grade, then the tougher HR control,
+// then more stamina. The sort is stable, so starters who are equal on all
+// three keep the order they came in.
+export function orderStarters<T extends StarterValues>(starters: readonly T[]): T[] {
+  return [...starters].sort(
+    (a, b) =>
+      gradeValue(b.grade) - gradeValue(a.grade) ||
+      tendencyRank(b.hrTendency) - tendencyRank(a.hrTendency) ||
+      (b.stamina ?? 0) - (a.stamina ?? 0),
+  );
+}
+
+// A staff comes out with its starters already in order, so the best one is
+// SP1 at the top of the starting pitcher finder.
 export function rollPitchingStaff(
   random: RandomSource = Math.random,
 ): StaffPitcher[] {
-  return PITCHER_SLOTS.map((slot) => ({
+  const rolled = PITCHER_SLOTS.map((slot) => ({
     slot,
     ...rollPitcher(roleForSlot(slot), random),
   }));
+  const starters = orderStarters(
+    rolled.filter((pitcher) => pitcher.role === "SP"),
+  ).map((pitcher, index) => ({ ...pitcher, slot: STARTER_SLOTS[index] }));
+  return [...starters, ...rolled.filter((pitcher) => pitcher.role !== "SP")];
 }
