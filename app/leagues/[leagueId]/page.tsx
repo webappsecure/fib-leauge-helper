@@ -75,11 +75,16 @@ async function LeagueHome({ params }: { params: Promise<{ leagueId: string }> })
                         {team.number}
                       </td>
                       <td className={`${cell} font-semibold`}>
-                        {team.city ?? (
-                          <span className="font-normal text-faint">
-                            City not set
-                          </span>
-                        )}
+                        <Link
+                          href={`/leagues/${league.id}/teams/${team.id}`}
+                          className="hover:text-accent-text hover:underline"
+                        >
+                          {team.city ?? (
+                            <span className="font-normal text-faint">
+                              City not set
+                            </span>
+                          )}
+                        </Link>
                       </td>
                       <td className={cell}>{team.name}</td>
                       <td className={`${cell} text-muted`}>

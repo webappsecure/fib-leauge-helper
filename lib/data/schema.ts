@@ -40,3 +40,63 @@ export const teams = sqliteTable(
     uniqueIndex("teams_league_number_unique").on(table.leagueId, table.number),
   ],
 );
+
+// One table for pitchers and, from feature 4, position players. The pitcher
+// columns are always filled for a pitcher, except stamina for a reliever.
+export const players = sqliteTable(
+  "players",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    leagueId: integer("league_id")
+      .notNull()
+      .references(() => leagues.id),
+    teamId: integer("team_id").references(() => teams.id),
+    slot: text("slot"),
+    kind: text("kind").notNull(),
+    naturalPosition: text("natural_position").notNull(),
+    name: text("name"),
+    nameListId: integer("name_list_id"),
+    age: integer("age").notNull(),
+    grade: text("grade"),
+    gradeCeiling: text("grade_ceiling"),
+    hrTendency: text("hr_tendency"),
+    stamina: integer("stamina"),
+    breakthroughUsed: integer("breakthrough_used", { mode: "boolean" })
+      .notNull()
+      .default(false),
+  },
+  (table) => [
+    uniqueIndex("players_team_slot_unique").on(table.teamId, table.slot),
+    // SQLite treats nulls as distinct, so unnamed players do not collide.
+    uniqueIndex("players_league_name_unique").on(
+      table.leagueId,
+      table.nameListId,
+    ),
+  ],
+);
+
+// The dice behind one rolled value on a player. Team rolls stay on the team
+// row.
+export const rolls = sqliteTable(
+  "rolls",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    leagueId: integer("league_id")
+      .notNull()
+      .references(() => leagues.id),
+    playerId: integer("player_id")
+      .notNull()
+      .references(() => players.id),
+    attribute: text("attribute").notNull(),
+    tableKey: text("table_key").notNull(),
+    dice: text("dice").notNull(),
+    result: text("result").notNull(),
+    source: text("source").notNull(),
+  },
+  (table) => [
+    uniqueIndex("rolls_player_attribute_unique").on(
+      table.playerId,
+      table.attribute,
+    ),
+  ],
+);

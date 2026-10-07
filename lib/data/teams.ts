@@ -1,4 +1,4 @@
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import type { TeamInput } from "../teams/validate";
 import { getDatabase, type Database } from "./db";
 import { teams } from "./schema";
@@ -17,6 +17,20 @@ export async function listTeams(
     .orderBy(asc(teams.number));
   // Quality columns are plain text in SQLite; saveTeams only writes validated values.
   return rows as Team[];
+}
+
+// Returns null when the team does not exist or belongs to another league.
+export async function getTeam(
+  leagueId: number,
+  teamId: number,
+  database?: Database,
+): Promise<Team | null> {
+  const db = database ?? (await getDatabase());
+  const [team] = await db
+    .select()
+    .from(teams)
+    .where(and(eq(teams.id, teamId), eq(teams.leagueId, leagueId)));
+  return (team as Team | undefined) ?? null;
 }
 
 // Inserts missing team numbers and updates existing ones in place, so a

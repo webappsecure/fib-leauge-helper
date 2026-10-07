@@ -15,6 +15,13 @@
       "when": 1791322825848,
       "tag": "0001_faithful_ironclad",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1791333548161,
+      "tag": "0002_sturdy_puck",
+      "breakpoints": true
     }
   ]
 }
