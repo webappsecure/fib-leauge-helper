@@ -14,3 +14,12 @@ export function pickName(
   if (unused.length === 0) return null;
   return unused[rollDie(unused.length, random) - 1];
 }
+
+let idsByFullName: Map<string, number> | undefined;
+
+// The list id of a full name, or null when the name is not on the list. The
+// match is exact apart from surrounding spaces.
+export function nameIdFor(fullName: string | null | undefined): number | null {
+  idsByFullName ??= new Map(NAME_LIST.map((entry) => [entry.fullName, entry.id]));
+  return idsByFullName.get((fullName ?? "").trim()) ?? null;
+}

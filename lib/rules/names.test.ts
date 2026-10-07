@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { NAME_LIST } from "./name-list";
-import { pickName } from "./names";
+import { nameIdFor, pickName } from "./names";
 
 describe("name list", () => {
   it("has 5,000 entries with ids 1 to 5,000 and no gaps", () => {
@@ -54,5 +54,24 @@ describe("pickName", () => {
       throw new Error("should not roll");
     };
     expect(pickName(everyId, random)).toBeNull();
+  });
+});
+
+describe("nameIdFor", () => {
+  it("returns the id of a listed name", () => {
+    expect(nameIdFor("Andrew Martinelli")).toBe(1);
+    expect(nameIdFor("Brady Beasley")).toBe(5000);
+  });
+
+  it("ignores surrounding spaces", () => {
+    expect(nameIdFor("  Andrew Martinelli ")).toBe(1);
+  });
+
+  it("returns null for a different case, a partial name or nothing", () => {
+    expect(nameIdFor("andrew martinelli")).toBeNull();
+    expect(nameIdFor("Andrew")).toBeNull();
+    expect(nameIdFor("Gordon Howland Made Up")).toBeNull();
+    expect(nameIdFor("")).toBeNull();
+    expect(nameIdFor(null)).toBeNull();
   });
 });

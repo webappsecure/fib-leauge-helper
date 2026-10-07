@@ -145,6 +145,37 @@ describe("position player tables", () => {
   });
 });
 
+describe("archetype ceilings", () => {
+  it("matches the ceiling table for every archetype", () => {
+    expect(ARCHETYPE_CEILINGS).toEqual({
+      "5E": { hitting: "A+", power: "A", defense: "A", clutch: "A" },
+      "5T": { hitting: "A", power: "B+", defense: "A", clutch: "A" },
+      HE: { hitting: "A+", power: "B", defense: "B+", clutch: "A" },
+      HK: { hitting: "B+", power: "A+", defense: "C", clutch: "B" },
+      DS: { hitting: "B", power: "B", defense: "A+", clutch: "A" },
+      JM: { hitting: "B", power: "B", defense: "B", clutch: "A" },
+    });
+  });
+
+  it("gives a rolled player all four ceilings of the final archetype", () => {
+    // Catcher: 66 is 5T, and an elite check of 51 makes it 5E.
+    expect(rollPositionPlayer("C", dice(66, 51, 11, 11, 11, 11, 11))).toMatchObject({
+      archetype: "5E",
+      hittingCeiling: "A+",
+      powerCeiling: "A",
+      defenseCeiling: "A",
+      clutchCeiling: "A",
+    });
+    expect(rollPositionPlayer("C", dice(66, 46, 11, 11, 11, 11, 11))).toMatchObject({
+      archetype: "5T",
+      hittingCeiling: "A",
+      powerCeiling: "B+",
+      defenseCeiling: "A",
+      clutchCeiling: "A",
+    });
+  });
+});
+
 describe("archetypeTableKey", () => {
   it("sends every outfield slot to the outfield table", () => {
     expect(archetypeTableKey("LF")).toBe("OF");

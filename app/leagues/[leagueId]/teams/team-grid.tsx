@@ -13,12 +13,13 @@ import {
   type GmCategory,
 } from "@/lib/rules/gm";
 import {
+  TEAM_TEXT_MAX_LENGTH,
   isTeamComplete,
   type TeamErrors,
   type TeamInput,
   type TeamTextField,
 } from "@/lib/teams/validate";
-import { saveTeamsAction } from "./actions";
+import { drawStaffNamesAction, saveTeamsAction } from "./actions";
 
 const ROLL_FIELD = {
   gmRisk: "gmRiskRoll",
@@ -27,6 +28,12 @@ const ROLL_FIELD = {
 } as const;
 
 const NO_CITIES_LEFT = "All 68 listed cities are in use. Type a city instead.";
+const NO_NAMES_LEFT = "No unused names are left on the list. Type a name instead.";
+
+type StaffField = "gmName" | "managerName";
+type StaffTarget = { number: number; field: StaffField };
+
+const STAFF_FIELDS: StaffField[] = ["gmName", "managerName"];
 
 const cell = "border-b border-border px-2 py-1 text-left align-top";
 const heading =
@@ -64,6 +71,8 @@ export function TeamGrid({
   const [message, setMessage] = useState("");
   const [dirty, setDirty] = useState(false);
   const [saving, startSaving] = useTransition();
+  const [nameNotice, setNameNotice] = useState("");
+  const [drawing, startDrawing] = useTransition();
   const tableRef = useRef<HTMLTableElement>(null);
 
   useEffect(() => {
@@ -174,6 +183,56 @@ export function TeamGrid({
     );
   }
 
+  // Asks the server for names, because the name list is not sent to the
+  // browser. The names now in the grid go along so none of them is repeated.
+  // With `onlyBlank`, a field filled in while the request was running keeps
+  // what was typed and its drawn name is dropped.
+  function drawNames(targets: StaffTarget[], onlyBlank = false) {
+    if (targets.length === 0) return;
+    const gridNames = teams.flatMap((team) =>
+      STAFF_FIELDS.flatMap((field) => {
+        const name = team[field]?.trim().slice(0, TEAM_TEXT_MAX_LENGTH);
+        return name ? [name] : [];
+      }),
+    );
+    startDrawing(async () => {
+      const result = await drawStaffNamesAction(leagueId, targets.length, gridNames);
+      if (!result.ok) {
+        setErrors((current) => ({ ...current, form: result.error }));
+        return;
+      }
+      setErrors((current) => (current.form ? { fields: current.fields } : current));
+      setNameNotice(result.names.length < targets.length ? NO_NAMES_LEFT : "");
+      if (result.names.length === 0) return;
+
+      const drawn = targets.slice(0, result.names.length);
+      drawn.forEach(({ number, field }) => clearFieldError(number, field));
+      change((current) =>
+        current.map((team) => {
+          const patch: Partial<TeamInput> = {};
+          drawn.forEach((target, index) => {
+            if (target.number !== team.number) return;
+            if (onlyBlank && team[target.field]?.trim()) return;
+            patch[target.field] = result.names[index];
+          });
+          return { ...team, ...patch };
+        }),
+      );
+    });
+  }
+
+  function drawBlankNames() {
+    drawNames(
+      teams.flatMap((team) =>
+        STAFF_FIELDS.filter((field) => !team[field]?.trim()).map((field) => ({
+          number: team.number,
+          field,
+        })),
+      ),
+      true,
+    );
+  }
+
   function save() {
     startSaving(async () => {
       const result = await saveTeamsAction(leagueId, teams);
@@ -190,6 +249,23 @@ export function TeamGrid({
 
   const attentionCount = Object.keys(errors.fields).length;
   const completeCount = teams.filter(isTeamComplete).length;
+
+  function nameInput(team: TeamInput, field: StaffField, label: string) {
+    return (
+      <div className="flex min-w-48 gap-1">
+        <div className="flex-1">{textInput(team, field, label)}</div>
+        <button
+          type="button"
+          onClick={() => drawNames([{ number: team.number, field }])}
+          disabled={drawing}
+          aria-label={`Random ${label} for team ${team.number}`}
+          className={smallButton}
+        >
+          Random
+        </button>
+      </div>
+    );
+  }
 
   function textInput(team: TeamInput, field: TeamTextField, label: string) {
     const error = errors.fields[team.number]?.[field];
@@ -250,6 +326,14 @@ export function TeamGrid({
             </button>
             <button
               type="button"
+              onClick={drawBlankNames}
+              disabled={drawing}
+              className={buttonClass.secondary}
+            >
+              Random names for blank GMs and managers
+            </button>
+            <button
+              type="button"
               onClick={save}
               disabled={saving}
               className={buttonClass.primary}
@@ -271,6 +355,9 @@ export function TeamGrid({
           </p>
         ) : null}
       </div>
+      <p role="status" className="mb-2 text-sm text-muted empty:mb-0">
+        {nameNotice}
+      </p>
       {errors.form ? (
         <p role="alert" className="mb-2 text-sm text-danger">
           {errors.form}
@@ -360,7 +447,7 @@ export function TeamGrid({
                       )}
                     </td>
                     <td className={cell}>{textInput(team, "name", "team name")}</td>
-                    <td className={cell}>{textInput(team, "gmName", "GM name")}</td>
+                    <td className={cell}>{nameInput(team, "gmName", "GM name")}</td>
                     {GM_CATEGORIES.map((category) => {
                       const quality = GM_QUALITIES[category];
                       const roll = team[ROLL_FIELD[category]];
@@ -403,7 +490,7 @@ export function TeamGrid({
                       );
                     })}
                     <td className={cell}>
-                      {textInput(team, "managerName", "manager")}
+                      {nameInput(team, "managerName", "manager name")}
                     </td>
                     <td className={cell}>
                       {textInput(team, "ballparkName", "ballpark name")}
@@ -436,7 +523,9 @@ export function TeamGrid({
         <p className="border-t border-border px-3 py-2 text-xs text-muted">
           A team is complete when it has a city and all three GM qualities. Type
           a city or roll one from the weighted list (1 to 348); no city is used
-          twice. A bullet means &quot;semi&quot;, as in the handbook.
+          twice. Random GM and manager names come from the name list and are
+          never shared with a player or another team. A bullet means
+          &quot;semi&quot;, as in the handbook.
         </p>
       </Panel>
     </>

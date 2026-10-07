@@ -3,18 +3,19 @@ import {
   createPitchingStaff,
   createPositionPlayers,
   listTeams,
-  listUsedNameIds,
 } from "../data";
 import type { Database } from "../data/db";
 import type { RandomSource } from "../rules/dice";
 import { pickName } from "../rules/names";
 import { rollPitchingStaff } from "../rules/pitchers";
 import { rollLineup } from "../rules/positions";
+import { usedNameIds } from "./name-pool";
 
 // Server-side only: this pulls in the 5,000-name list.
 
 // Gives each rolled player an unused name and marks it used, so no name
-// repeats in the league. A player gets no name once the list is exhausted.
+// repeats in the league, including the names of saved GMs and managers. A
+// player gets no name once the list is exhausted.
 function withNames<T>(rolled: T[], used: Set<number>, random: RandomSource) {
   return rolled.map((player) => {
     const name = pickName(used, random);
@@ -60,7 +61,7 @@ export async function generatePitchingStaff(
   random: RandomSource = Math.random,
   database?: Database,
 ): Promise<number> {
-  const used = new Set(await listUsedNameIds(leagueId, database));
+  const used = await usedNameIds(leagueId, database);
   return addPitchingStaff(leagueId, teamId, used, random, database);
 }
 
@@ -70,7 +71,7 @@ export async function generatePositionPlayers(
   random: RandomSource = Math.random,
   database?: Database,
 ): Promise<number> {
-  const used = new Set(await listUsedNameIds(league.id, database));
+  const used = await usedNameIds(league.id, database);
   return addPositionPlayers(league, teamId, used, random, database);
 }
 
@@ -86,7 +87,7 @@ export async function generateLeague(
   const counts = new Map(
     (await countPlayersByTeam(league.id, database)).map((entry) => [entry.teamId, entry]),
   );
-  const used = new Set(await listUsedNameIds(league.id, database));
+  const used = await usedNameIds(league.id, database);
 
   const result = { teams: 0, players: 0 };
   for (const team of teams) {
